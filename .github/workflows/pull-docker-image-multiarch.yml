@@ -60,13 +60,14 @@ jobs:
 
       - name: Save Image as TAR
         run: |
-          # 将镜像名称中的 / 和 : 替换为下划线，作为文件名
-          IMAGE_FILE=$(echo "${{ github.event.inputs.image_name }}" | sed 's/[\/:]/_/g')
+          # 将镜像名称中的 / 和 : 替换为下划线，作为文件名和 artifact 名称
+          SAFE_IMAGE=$(echo "${{ github.event.inputs.image_name }}" | sed 's/[\/:]/_/g')
           # 将平台名称中的 / 替换为下划线
-          PLATFORM=$(echo "${{ github.event.inputs.platform }}" | sed 's/\//_/g')
-          echo "IMAGE_FILE=${IMAGE_FILE}_${PLATFORM}.tar" >> $GITHUB_ENV
-          echo "正在保存镜像为: ${IMAGE_FILE}_${PLATFORM}.tar"
-          docker save -o ${IMAGE_FILE}_${PLATFORM}.tar ${{ github.event.inputs.image_name }}
+          SAFE_PLATFORM=$(echo "${{ github.event.inputs.platform }}" | sed 's/\//_/g')
+          echo "IMAGE_FILE=${SAFE_IMAGE}_${SAFE_PLATFORM}.tar" >> $GITHUB_ENV
+          echo "ARTIFACT_NAME=docker-image-${SAFE_IMAGE}-${SAFE_PLATFORM}" >> $GITHUB_ENV
+          echo "正在保存镜像为: ${SAFE_IMAGE}_${SAFE_PLATFORM}.tar"
+          docker save -o ${SAFE_IMAGE}_${SAFE_PLATFORM}.tar ${{ github.event.inputs.image_name }}
 
       - name: Display TAR File Size
         run: |
@@ -78,7 +79,7 @@ jobs:
       - name: Upload TAR Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: docker-image-${{ github.event.inputs.image_name }}-${{ github.event.inputs.platform }}
+          name: ${{ env.ARTIFACT_NAME }}
           path: ${{ env.IMAGE_FILE }}
           retention-days: ${{ github.event.inputs.retention_days }}
           compression-level: 9
