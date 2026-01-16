@@ -60,6 +60,46 @@ jobs:
         env:
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Configure Docker to use /mnt
+        run: |
+          echo "=========================================="
+          echo "重新配置 Docker 数据目录到 /mnt"
+          echo "=========================================="
+
+          # 停止 Docker 服务
+          sudo systemctl stop docker docker.socket containerd
+
+          # 创建新的 Docker 数据目录
+          sudo mkdir -p /mnt/docker
+
+          # 配置 Docker 使用新目录
+          sudo tee /etc/docker/daemon.json > /dev/null <<EOF
+          {
+            "data-root": "/mnt/docker"
+          }
+          EOF
+
+          # 迁移现有数据（如果需要）
+          if [ -d "/var/lib/docker" ] && [ "$(ls -A /var/lib/docker)" ]; then
+            echo "迁移现有 Docker 数据..."
+            sudo rsync -aP /var/lib/docker/ /mnt/docker/
+          fi
+
+          # 启动 Docker 服务
+          sudo systemctl start docker
+
+          # 等待 Docker 就绪
+          echo "等待 Docker 启动..."
+          timeout 30 bash -c 'until docker info >/dev/null 2>&1; do sleep 1; done' || {
+            echo "Docker 启动失败"
+            sudo systemctl status docker
+            exit 1
+          }
+
+          echo "✅ Docker 已重新配置并启动"
+          docker info | grep "Docker Root Dir"
+          echo "=========================================="
+
       - name: Check Disk Space
         run: |
           echo "=========================================="
@@ -89,27 +129,6 @@ jobs:
           docker image prune -f
           echo "清理完成后的磁盘空间:"
           df -h
-
-      - name: Check /mnt Directory
-        run: |
-          echo "=========================================="
-          echo "检查 /mnt 目录空间"
-          echo "=========================================="
-
-          # 检查 /mnt 目录是否存在
-          if [ ! -d "/mnt" ]; then
-            echo "创建 /mnt 目录..."
-            sudo mkdir -p /mnt
-            sudo chmod 777 /mnt
-          fi
-
-          # 显示 /mnt 和当前目录的空间
-          echo "/mnt 目录磁盘空间:"
-          df -h /mnt
-          echo ""
-          echo "当前目录磁盘空间:"
-          df -h .
-          echo "=========================================="
 
       - name: Save Image as TAR
         run: |
