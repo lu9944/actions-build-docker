@@ -10,6 +10,7 @@ GitHub Actions 工作流，用于拉取指定的 Docker 镜像并保存为 TAR �
 - 拉取任意 Docker 镜像（包括私有仓库，需配置权限）
 - 自动保存为 TAR 格式文件
 - 自动创建 GitHub Release，方便下载和长期存储
+- **支持同时上传到 FTP 服务器**
 - 支持多架构镜像（amd64, arm64, arm/v7, ppc64le, s390x）
 - 手动触发，灵活控制
 - 自动显示镜像信息和文件大小
@@ -95,6 +96,9 @@ docker run -it nginx:latest
 | 参数 | 必填 | 默认值 | 说明 |
 |------|------|--------|------|
 | image_name | 是 | nginx:latest | Docker 镜像名称 |
+| enable_ftp | 否 | false | 是否启用 FTP 上传 |
+| ftp_port | 否 | 21 | FTP 端口 |
+| ftp_path | 否 | / | FTP 目标路径 |
 
 ### 多架构工作流 (`pull-docker-image-multiarch.yml`)
 
@@ -102,6 +106,51 @@ docker run -it nginx:latest
 |------|------|--------|------|
 | image_name | 是 | nginx:latest | Docker 镜像名称 |
 | platform | 否 | linux/amd64 | 目标平台架构 |
+| enable_ftp | 否 | false | 是否启用 FTP 上传 |
+| ftp_port | 否 | 21 | FTP 端口 |
+| ftp_path | 否 | / | FTP 目标路径 |
+
+## FTP 上传配置
+
+### 配置步骤
+
+1. **在 GitHub 仓库中添加 Secrets**
+
+   进入仓库的 **Settings** > **Secrets and variables** > **Actions**，添加以下密钥：
+
+   - `FTP_SERVER` - FTP 服务器地址（例如：`ftp.example.com`）
+   - `FTP_USERNAME` - FTP 登录用户名
+   - `FTP_PASSWORD` - FTP 登录密码
+
+2. **运行工作流时启用 FTP**
+
+   在手动触发工作流时：
+   - 勾选 **enable_ftp** 选项
+   - 填写 **ftp_port**（默认 `21`，一般使用默认值即可）
+   - 填写 **ftp_path**（例如：`/docker-images/`，注意路径需要以 `/` 结尾）
+
+### FTP 配置示例
+
+**Secrets 配置**：
+```
+FTP_SERVER: ftp.example.com
+FTP_USERNAME: your_username
+FTP_PASSWORD: your_password
+```
+
+**运行工作流时**：
+```
+enable_ftp: ✅ (勾选)
+ftp_port: 21
+ftp_path: /docker-images/
+```
+
+### 注意事项
+
+- FTP 上传使用 `curl` 命令，支持自动创建不存在的目录（`--ftp-create-dirs`）
+- 凭证信息通过 GitHub Secrets 存储，不会在日志中暴露
+- 文件会同时上传到 GitHub Release 和 FTP 服务器
+- 上传完成后可以在 Actions 日志中查看详细的传输信息
 
 ## 支持的平台架构
 
@@ -140,7 +189,13 @@ docker run -it nginx:latest
     password: ${{ secrets.REGISTRY_PASSWORD }}
 ```
 
-然后在 Repository Settings > Secrets and variables > Actions 中添加对应的密钥。
+然后在 **Settings** > **Secrets and variables** > **Actions** 中添加对应的密钥：
+
+- `REGISTRY_USERNAME` - 私有仓库用户名
+- `REGISTRY_PASSWORD` - 私有仓库密码
+- `FTP_SERVER` - FTP 服务器地址（如需使用 FTP 上传）
+- `FTP_USERNAME` - FTP 用户名（如需使用 FTP 上传）
+- `FTP_PASSWORD` - FTP 密码（如需使用 FTP 上传）
 
 ## 故障排查
 
@@ -169,6 +224,28 @@ docker run -it nginx:latest
 **解决方法**:
 1. 在 [Docker Hub](https://hub.docker.com/) 搜索正确的镜像名称
 2. 确认标签是否存在（如 `latest`, `alpine` 等）
+
+### 问题 4: FTP 上传失败
+
+**原因**:
+- FTP 服务器地址或端口配置错误
+- FTP 用户名或密码错误
+- FTP 路径没有写权限
+
+**解决方法**:
+1. 检查 GitHub Secrets 中的 `FTP_SERVER`、`FTP_USERNAME` 和 `FTP_PASSWORD` 是否正确
+2. 确认 FTP 服务器地址和端口配置正确
+3. 确认 FTP 用户对目标路径有写入权限
+4. 查看 Actions 日志中的详细错误信息（包含 `-v` 参数的详细输出）
+
+### 问题 5: FTP 路径不存在
+
+**原因**: 目标 FTP 目录不存在且无法自动创建
+
+**解决方法**:
+- 工作流使用 `--ftp-create-dirs` 参数自动创建目录
+- 如果自动创建失败，请手动在 FTP 服务器上创建目标目录
+- 或者使用 FTP 用户有权限的现有目录
 
 ## 高级用法
 

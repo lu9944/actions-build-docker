@@ -10,6 +10,19 @@ on:
         description: 'Docker 镜像名称（例如：nginx:latest）'
         required: true
         default: 'nginx:latest'
+      enable_ftp:
+        description: '是否启用 FTP 上传'
+        required: false
+        default: false
+        type: boolean
+      ftp_port:
+        description: 'FTP 端口（默认：21）'
+        required: false
+        default: '21'
+      ftp_path:
+        description: 'FTP 目标路径（例如：/docker-images/）'
+        required: false
+        default: '/'
 
 jobs:
   pull-and-save:
@@ -81,6 +94,34 @@ jobs:
           fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload to FTP
+        if: ${{ github.event.inputs.enable_ftp == 'true' }}
+        run: |
+          echo "=========================================="
+          echo "开始上传到 FTP 服务器"
+          echo "=========================================="
+          echo "FTP 服务器: *** (已配置)"
+          echo "FTP 端口: ${{ github.event.inputs.ftp_port }}"
+          echo "FTP 路径: ${{ github.event.inputs.ftp_path }}"
+          echo "文件: ${{ env.IMAGE_FILE }}"
+
+          # 确保路径以 / 结尾
+          FTP_PATH="${{ github.event.inputs.ftp_path }}"
+          if [[ "${FTP_PATH: -1}" != "/" ]]; then
+            FTP_PATH="${FTP_PATH}/"
+          fi
+
+          # 使用 curl 上传文件到 FTP
+          curl -T "${{ env.IMAGE_FILE }}" \
+            "ftp://${{ secrets.FTP_SERVER }}:${{ github.event.inputs.ftp_port }}${FTP_PATH}${{ env.IMAGE_FILE }}" \
+            --user "${{ secrets.FTP_USERNAME }}:${{ secrets.FTP_PASSWORD }}" \
+            --ftp-create-dirs \
+            -v
+
+          echo "=========================================="
+          echo "✅ FTP 上传完成!"
+          echo "=========================================="
 
       - name: Summary
         run: |
