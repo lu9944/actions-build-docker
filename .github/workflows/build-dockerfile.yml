@@ -1,0 +1,232 @@
+name: Build Dockerfile and Save as TAR
+
+permissions:
+  contents: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      dockerfile_path:
+        description: 'Dockerfile 路径（相对于仓库根目录，例如：Dockerfile 或 ./docker/Dockerfile）'
+        required: true
+        default: 'Dockerfile'
+      image_name:
+        description: '构建后的镜像名称和标签（例如：myapp:latest）'
+        required: true
+        default: 'myapp:latest'
+      build_context:
+        description: '构建上下文路径（默认为 Dockerfile 所在目录）'
+        required: false
+        default: '.'
+      enable_release:
+        description: '是否上传到 GitHub Release'
+        required: false
+        default: true
+        type: boolean
+      enable_ftp:
+        description: '是否启用 FTP 上传'
+        required: false
+        default: false
+        type: boolean
+      ftp_port:
+        description: 'FTP 端口（默认：21）'
+        required: false
+        default: '21'
+      ftp_path:
+        description: 'FTP 目标路径（例如：/docker-images/）'
+        required: false
+        default: '/'
+
+jobs:
+  build-and-save:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Display Build Configuration
+        run: |
+          echo "=========================================="
+          echo "Dockerfile Builder"
+          echo "=========================================="
+          echo "Dockerfile 路径: ${{ github.event.inputs.dockerfile_path }}"
+          echo "镜像名称: ${{ github.event.inputs.image_name }}"
+          echo "构建上下文: ${{ github.event.inputs.build_context }}"
+          echo "=========================================="
+
+      - name: Verify Dockerfile Exists
+        run: |
+          if [ ! -f "${{ github.event.inputs.dockerfile_path }}" ]; then
+            echo "❌ 错误: Dockerfile 文件不存在于 ${{ github.event.inputs.dockerfile_path }}"
+            echo "请检查路径是否正确"
+            exit 1
+          fi
+          echo "✅ Dockerfile 文件存在"
+          echo ""
+          echo "Dockerfile 内容预览:"
+          echo "=========================================="
+          cat "${{ github.event.inputs.dockerfile_path }}"
+          echo "=========================================="
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME || 'dockerhub_token_user' }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+        continue-on-error: true
+        env:
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Display Authentication Status
+        run: |
+          if [ -n "$DOCKERHUB_TOKEN" ]; then
+            echo "✅ 已使用 Docker Hub Token 认证（Pro 模式）"
+          else
+            echo "⚠️  未配置 Docker Hub Token，使用匿名模式（有限制）"
+          fi
+        env:
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build Docker Image
+        run: |
+          echo "正在构建镜像: ${{ github.event.inputs.image_name }}"
+          echo "构建上下文: ${{ github.event.inputs.build_context }}"
+          echo "Dockerfile: ${{ github.event.inputs.dockerfile_path }}"
+
+          docker build \
+            -f "${{ github.event.inputs.dockerfile_path }}" \
+            -t "${{ github.event.inputs.image_name }}" \
+            "${{ github.event.inputs.build_context }}"
+
+      - name: Display Image Details
+        run: |
+          echo "构建完成的镜像信息:"
+          docker images ${{ github.event.inputs.image_name }}
+          echo ""
+          echo "镜像详细信息:"
+          docker inspect ${{ github.event.inputs.image_name }} --format='{{.Id}}'
+          docker inspect ${{ github.event.inputs.image_name }} --format='构建时间: {{.Created}}'
+          docker inspect ${{ github.event.inputs.image_name }} --format='镜像大小: {{.Size}}'
+
+      - name: Save Image as TAR
+        run: |
+          # 将镜像名称中的 / 和 : 替换为下划线，作为文件名
+          SAFE_NAME=$(echo "${{ github.event.inputs.image_name }}" | sed 's/[\/:]/_/g')
+          echo "IMAGE_FILE=${SAFE_NAME}.tar" >> $GITHUB_ENV
+          echo "ARTIFACT_NAME=docker-image-${SAFE_NAME}" >> $GITHUB_ENV
+          echo "正在保存镜像为: ${SAFE_NAME}.tar"
+          docker save -o ${SAFE_NAME}.tar ${{ github.event.inputs.image_name }}
+
+      - name: Display TAR File Size
+        run: |
+          echo "TAR 文件信息:"
+          ls -lh ${{ env.IMAGE_FILE }}
+          echo "文件大小详情:"
+          du -h ${{ env.IMAGE_FILE }}
+          echo ""
+          echo "文件信息:"
+          file ${{ env.IMAGE_FILE }}
+
+      - name: Generate Release Info
+        if: ${{ github.event.inputs.enable_release == 'true' }}
+        run: |
+          # 生成时间戳作为 Release tag
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          echo "RELEASE_TAG=docker-build-${TIMESTAMP}" >> $GITHUB_ENV
+          echo "TIMESTAMP=${TIMESTAMP}" >> $GITHUB_ENV
+
+      - name: Create Release and Upload TAR
+        if: ${{ github.event.inputs.enable_release == 'true' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: "${{ env.ARTIFACT_NAME }} - ${{ env.TIMESTAMP }}"
+          body: |
+            ## Docker 镜像构建导出
+
+            - **镜像名称**: `${{ github.event.inputs.image_name }}`
+            - **Dockerfile 路径**: `${{ github.event.inputs.dockerfile_path }}`
+            - **构建时间**: ${{ env.TIMESTAMP }}
+            - **文件大小**: ${{ env.IMAGE_FILE }}
+
+            ### 使用方法
+
+            ```bash
+            # 下载后加载镜像
+            docker load -i ${{ env.IMAGE_FILE }}
+
+            # 运行镜像
+            docker run -it ${{ github.event.inputs.image_name }}
+            ```
+
+            ### 构建信息
+            - 此镜像从 Dockerfile 构建而来
+            - 可在离线环境中使用
+          files: ${{ env.IMAGE_FILE }}
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload to FTP
+        if: ${{ github.event.inputs.enable_ftp == 'true' }}
+        run: |
+          echo "=========================================="
+          echo "开始上传到 FTP 服务器"
+          echo "=========================================="
+          echo "FTP 服务器: *** (已配置)"
+          echo "FTP 端口: ${{ github.event.inputs.ftp_port }}"
+          echo "FTP 路径: ${{ github.event.inputs.ftp_path }}"
+          echo "文件: ${{ env.IMAGE_FILE }}"
+
+          # 确保路径以 / 结尾
+          FTP_PATH="${{ github.event.inputs.ftp_path }}"
+          if [[ "${FTP_PATH: -1}" != "/" ]]; then
+            FTP_PATH="${FTP_PATH}/"
+          fi
+
+          # 使用 curl 上传文件到 FTP
+          curl -T "${{ env.IMAGE_FILE }}" \
+            "ftp://${{ secrets.FTP_SERVER }}:${{ github.event.inputs.ftp_port }}${FTP_PATH}${{ env.IMAGE_FILE }}" \
+            --user "${{ secrets.FTP_USERNAME }}:${{ secrets.FTP_PASSWORD }}" \
+            --ftp-create-dirs \
+            -v
+
+          echo "=========================================="
+          echo "✅ FTP 上传完成!"
+          echo "=========================================="
+
+      - name: Summary
+        run: |
+          echo "=========================================="
+          echo "✅ 构建任务完成!"
+          echo "=========================================="
+          echo "镜像名称: ${{ github.event.inputs.image_name }}"
+          echo "镜像已保存为: ${{ env.IMAGE_FILE }}"
+          echo "Dockerfile 路径: ${{ github.event.inputs.dockerfile_path }}"
+
+          # 根据 Release 开关状态显示不同信息
+          if [[ "${{ github.event.inputs.enable_release }}" == "true" ]]; then
+            echo "✅ 已上传到 GitHub Release"
+            echo "Release Tag: ${{ env.RELEASE_TAG }}"
+            echo "请在下方的 Releases 区域下载文件"
+          else
+            echo "⏭️  已跳过 GitHub Release 上传"
+          fi
+
+          # 根据 FTP 开关状态显示不同信息
+          if [[ "${{ github.event.inputs.enable_ftp }}" == "true" ]]; then
+            echo "✅ 已上传到 FTP 服务器"
+          else
+            echo "⏭️  已跳过 FTP 上传"
+          fi
+
+          echo "=========================================="
+          echo ""
+          echo "📦 离线使用方法:"
+          echo "1. 下载 TAR 文件"
+          echo "2. 运行: docker load -i ${{ env.IMAGE_FILE }}"
+          echo "3. 运行: docker run -it ${{ github.event.inputs.image_name }}"
+          echo "=========================================="

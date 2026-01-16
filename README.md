@@ -3,11 +3,12 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-2088FF.svg?logo=github-actions)](https://github.com/features/actions)
 
-GitHub Actions 工作流，用于拉取指定的 Docker 镜像并保存为 TAR 文件供下载。
+GitHub Actions 工作流，用于拉取指定的 Docker 镜像或从 Dockerfile 构建镜像，并保存为 TAR 文件供下载。
 
 ## 功能特点
 
 - 拉取任意 Docker 镜像（包括私有仓库，需配置权限）
+- **从 Dockerfile 构建自定义镜像**
 - 自动保存为 TAR 格式文件
 - 自动创建 GitHub Release，方便下载和长期存储
 - **支持同时上传到 FTP 服务器**
@@ -18,6 +19,7 @@ GitHub Actions 工作流，用于拉取指定的 Docker 镜像并保存为 TAR �
 ## 使用场景
 
 - 在无法访问 Docker Hub 的环境中下载镜像
+- 从 Dockerfile 构建自定义镜像并导出
 - 将镜像保存到本地进行离线部署
 - 备份重要的 Docker 镜像
 - 在内网环境中部署容器应用
@@ -82,6 +84,21 @@ GitHub Actions 工作流，用于拉取指定的 Docker 镜像并保存为 TAR �
 1. 按照上述步骤操作
 2. 额外选择 **目标平台架构**（如 `linux/arm64`）
 
+### 方式三：从 Dockerfile 构建镜像
+
+如果你想从自己的 Dockerfile 构建镜像并打包，使用 `.github/workflows/build-dockerfile.yml`：
+
+1. 在你的仓库中创建或添加 Dockerfile
+2. 在 GitHub 上进入 **Actions** 标签页
+3. 选择 **Build Dockerfile and Save as TAR** 工作流
+4. 点击 **Run workflow**
+5. 输入参数：
+   - **Dockerfile 路径**: 例如 `Dockerfile` 或 `./docker/Dockerfile`
+   - **镜像名称**: 例如 `myapp:v1.0`
+   - **构建上下文**: 默认为 `.`（Dockerfile 所在目录）
+6. 等待构建完成
+7. 在仓库的 **Releases** 区域下载 TAR 文件
+
 ## 使用示例
 
 ### 示例 1: 下载官方 Nginx 镜像
@@ -108,6 +125,25 @@ GitHub Actions 工作流，用于拉取指定的 Docker 镜像并保存为 TAR �
 ```
 
 生成的文件名: `docker-image-arm64v8_ubuntu_latest-linux_arm64.tar`
+
+### 示例 4: 从 Dockerfile 构建自定义镜像
+
+假设你的仓库中有以下 Dockerfile：
+
+```dockerfile
+FROM nginx:alpine
+COPY index.html /usr/share/nginx/html/
+```
+
+运行工作流时输入：
+
+```
+Dockerfile 路径: Dockerfile
+镜像名称: my-nginx:custom
+构建上下文: .
+```
+
+生成的文件名: `docker-image-my-nginx_custom.tar`
 
 ## 本地加载镜像
 
@@ -147,6 +183,18 @@ docker run -it nginx:latest
 |------|------|--------|------|
 | image_name | 是 | nginx:latest | Docker 镜像名称 |
 | platform | 否 | linux/amd64 | 目标平台架构 |
+| enable_release | 否 | true | 是否上传到 GitHub Release |
+| enable_ftp | 否 | false | 是否启用 FTP 上传 |
+| ftp_port | 否 | 21 | FTP 端口 |
+| ftp_path | 否 | / | FTP 目标路径 |
+
+### Dockerfile 构建工作流 (`build-dockerfile.yml`)
+
+| 参数 | 必填 | 默认值 | 说明 |
+|------|------|--------|------|
+| dockerfile_path | 是 | Dockerfile | Dockerfile 路径（相对于仓库根目录） |
+| image_name | 是 | myapp:latest | 构建后的镜像名称和标签 |
+| build_context | 否 | . | 构建上下文路径 |
 | enable_release | 否 | true | 是否上传到 GitHub Release |
 | enable_ftp | 否 | false | 是否启用 FTP 上传 |
 | ftp_port | 否 | 21 | FTP 端口 |
@@ -307,6 +355,55 @@ on:
   schedule:
     - cron: '0 0 * * 0'  # 每周日 00:00 执行
 ```
+
+## 示例项目
+
+仓库中包含了一个完整的示例项目，位于 `examples/simple-webapp/` 目录。
+
+### 示例内容
+
+- **Dockerfile** - 基于 Nginx Alpine 的简单 Web 应用
+- **index.html** - 漂亮的静态网页
+- **README.md** - 详细的使用说明
+
+### 快速测试
+
+1. **查看示例文件**
+   ```bash
+   ls examples/simple-webapp/
+   # 输出: Dockerfile  index.html  README.md
+   ```
+
+2. **运行 GitHub Actions 构建**
+   - 进入仓库的 **Actions** 标签页
+   - 选择 **Build Dockerfile and Save as TAR** 工作流
+   - 填写参数：
+     - Dockerfile 路径: `examples/simple-webapp/Dockerfile`
+     - 镜像名称: `example-webapp:v1.0`
+     - 构建上下文: `examples/simple-webapp`
+   - 点击运行
+
+3. **下载并测试**
+   ```bash
+   # 下载 Release 中的 tar 文件
+   # 加载镜像
+   docker load -i docker-image-example-webapp_v1.0.tar
+
+   # 运行容器
+   docker run -d -p 8080:80 example-webapp:v1.0
+
+   # 访问 http://localhost:8080
+   ```
+
+### 示例特点
+
+- ✅ 简单易懂，适合学习
+- ✅ 完整的文档说明
+- ✅ 可直接用于生产环境
+- ✅ 支持离线部署
+- ✅ 体积小（约 40MB）
+
+📖 **更多详情**: 查看 [examples/simple-webapp/README.md](examples/simple-webapp/README.md)
 
 ## 贡献
 
