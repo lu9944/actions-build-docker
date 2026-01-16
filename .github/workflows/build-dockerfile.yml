@@ -96,26 +96,32 @@ jobs:
           echo "构建上下文: ${{ github.event.inputs.build_context }}"
           echo "Dockerfile: ${{ github.event.inputs.dockerfile_path }}"
 
+          # 进入构建上下文目录
+          cd "${{ github.event.inputs.build_context }}"
+
           # 计算相对路径
           BUILD_CONTEXT="${{ github.event.inputs.build_context }}"
           DOCKERFILE="${{ github.event.inputs.dockerfile_path }}"
 
           # 如果 Dockerfile 在构建上下文内部，使用相对路径
           if [[ "$DOCKERFILE" == "$BUILD_CONTEXT"* ]]; then
-            # 移除构建上下文前缀
+            # 移除构建上下文前缀，得到相对于构建上下文的路径
             RELATIVE_DOCKERFILE="${DOCKERFILE#$BUILD_CONTEXT/}"
             echo "使用相对 Dockerfile 路径: $RELATIVE_DOCKERFILE"
+            echo "当前目录: $(pwd)"
+            echo "Dockerfile 存在检查: $(test -f "$RELATIVE_DOCKERFILE" && echo '存在' || echo '不存在')"
+
             docker build \
               -f "$RELATIVE_DOCKERFILE" \
               -t "${{ github.event.inputs.image_name }}" \
-              "$BUILD_CONTEXT"
+              .
           else
             # Dockerfile 在构建上下文外部，使用绝对路径
             echo "使用绝对 Dockerfile 路径: $DOCKERFILE"
             docker build \
-              -f "$DOCKERFILE" \
+              -f "../$DOCKERFILE" \
               -t "${{ github.event.inputs.image_name }}" \
-              "$BUILD_CONTEXT"
+              .
           fi
 
       - name: Display Image Details
