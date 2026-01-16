@@ -22,6 +22,46 @@ GitHub Actions 工作流，用于拉取指定的 Docker 镜像并保存为 TAR �
 - 备份重要的 Docker 镜像
 - 在内网环境中部署容器应用
 
+## 配置 Docker Hub Token（推荐）
+
+如果你是 **Docker Pro** 或付费用户，配置 Personal Access Token 可以获得更高的拉取限制和更好的性能。
+
+### 为什么要配置？
+
+- ✅ **更高的速率限制**：从每 6 小时 100 次提升到更高限制
+- ✅ **访问私有镜像**：可以拉取你账户下的私有镜像
+- ✅ **避免匿名限制**：不再受匿名用户限制影响
+- ✅ **更好的稳定性**：减少因限流导致的失败
+
+### 快速配置步骤
+
+**1. 创建 Docker Hub Access Token**
+- 登录 https://hub.docker.com/
+- 进入 **Account Settings** → **Security** → **Access Tokens**
+- 点击 **New Access Token**
+- 输入描述（如 `GitHub Actions`），选择权限
+- 复制生成的 token（格式：`dckr_pat_...`）
+
+**2. 添加到 GitHub Secrets**
+- 进入你的仓库 **Settings** → **Secrets and variables** → **Actions**
+- 点击 **New repository secret**
+- **Name**: `DOCKERHUB_TOKEN`
+- **Secret**: 粘贴你的 Docker Hub Token
+- 点击 **Add secret**
+
+> **用户名（可选）**：你也可以添加 `DOCKERHUB_USERNAME` Secret（你的 Docker Hub 用户名），但不是必需的。
+
+**3. 验证配置**
+运行工作流后，在日志中查找：
+- ✅ `已使用 Docker Hub Token 认证（Pro 模式）` - 配置成功
+- ⚠️ `未配置 Docker Hub Token，使用匿名模式` - 未配置
+
+### 向后兼容
+
+未配置 `DOCKERHUB_TOKEN` 的工作流仍然可以正常运行，只是使用匿名模式（有限制）。
+
+📖 **详细配置指南**: 查看 [DOCKER_HUB_SETUP.md](DOCKER_HUB_SETUP.md) 获取完整的配置说明和故障排除。
+
 ## 快速开始
 
 ### 方式一：使用基础工作流（推荐新手）
@@ -178,9 +218,15 @@ ftp_path: /docker-images/
 
 ## 使用私有镜像
 
-如果需要拉取私有仓库的镜像，需要先配置 Docker 登录凭证：
+### Docker Hub 私有镜像
 
-在工作流中添加以下步骤：
+如果你已配置 `DOCKERHUB_TOKEN`（见上方"配置 Docker Hub Token"），工作流会自动使用你的凭证登录 Docker Hub，可以直接拉取私有镜像。
+
+### 其他私有镜像仓库
+
+如果需要拉取其他私有仓库（如 GCR、ECR、自建 Harbor 等），需要添加登录步骤。
+
+在工作流的"Pull Docker Image"步骤之前添加：
 
 ```yaml
 - name: Login to Docker Registry
@@ -191,13 +237,10 @@ ftp_path: /docker-images/
     password: ${{ secrets.REGISTRY_PASSWORD }}
 ```
 
-然后在 **Settings** > **Secrets and variables** > **Actions** 中添加对应的密钥：
+然后在 **Settings** → **Secrets and variables** → **Actions** 中添加对应的密钥：
 
 - `REGISTRY_USERNAME` - 私有仓库用户名
-- `REGISTRY_PASSWORD` - 私有仓库密码
-- `FTP_SERVER` - FTP 服务器地址（如需使用 FTP 上传）
-- `FTP_USERNAME` - FTP 用户名（如需使用 FTP 上传）
-- `FTP_PASSWORD` - FTP 密码（如需使用 FTP 上传）
+- `REGISTRY_PASSWORD` - 私有仓库密码或访问令牌
 
 ## 故障排查
 

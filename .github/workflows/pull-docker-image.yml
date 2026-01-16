@@ -41,6 +41,21 @@ jobs:
           echo "镜像名称: ${{ github.event.inputs.image_name }}"
           echo "=========================================="
 
+      - name: Login to Docker Hub
+        if: ${{ secrets.DOCKERHUB_TOKEN != '' }}
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME || 'dockerhub_token_user' }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Display Authentication Status
+        run: |
+          if [ -n "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
+            echo "✅ 已使用 Docker Hub Token 认证（Pro 模式）"
+          else
+            echo "⚠️  未配置 Docker Hub Token，使用匿名模式（有限制）"
+          fi
+
       - name: Pull Docker Image
         run: |
           echo "正在拉取镜像: ${{ github.event.inputs.image_name }}"
