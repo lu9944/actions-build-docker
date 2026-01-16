@@ -90,27 +90,49 @@ jobs:
           echo "清理完成后的磁盘空间:"
           df -h
 
+      - name: Check /mnt Directory
+        run: |
+          echo "=========================================="
+          echo "检查 /mnt 目录空间"
+          echo "=========================================="
+
+          # 检查 /mnt 目录是否存在
+          if [ ! -d "/mnt" ]; then
+            echo "创建 /mnt 目录..."
+            sudo mkdir -p /mnt
+            sudo chmod 777 /mnt
+          fi
+
+          # 显示 /mnt 和当前目录的空间
+          echo "/mnt 目录磁盘空间:"
+          df -h /mnt
+          echo ""
+          echo "当前目录磁盘空间:"
+          df -h .
+          echo "=========================================="
+
       - name: Save Image as TAR
         run: |
           # 将镜像名称中的 / 和 : 替换为下划线，作为文件名和 artifact 名称
           SAFE_NAME=$(echo "${{ github.event.inputs.image_name }}" | sed 's/[\/:]/_/g')
-          echo "IMAGE_FILE=${SAFE_NAME}.tar" >> $GITHUB_ENV
+          IMAGE_FILE="/mnt/${SAFE_NAME}.tar"
+          echo "IMAGE_FILE=${IMAGE_FILE}" >> $GITHUB_ENV
           echo "ARTIFACT_NAME=docker-image-${SAFE_NAME}" >> $GITHUB_ENV
-          echo "正在保存镜像为: ${SAFE_NAME}.tar"
+          echo "正在保存镜像为: ${IMAGE_FILE}"
 
-          # 检查可用空间
-          AVAILABLE_SPACE=$(df -BG / | awk 'NR==2 {print $4}' | sed 's/G//')
-          echo "当前可用空间: ${AVAILABLE_SPACE}GB"
+          # 检查 /mnt 可用空间
+          AVAILABLE_SPACE=$(df -BG /mnt | awk 'NR==2 {print $4}' | sed 's/G//')
+          echo "/mnt 可用空间: ${AVAILABLE_SPACE}GB"
 
           if [ "$AVAILABLE_SPACE" -lt 5 ]; then
-            echo "⚠️  警告: 可用磁盘空间不足 5GB，可能无法完成导出"
+            echo "⚠️  警告: /mnt 可用磁盘空间不足 5GB，可能无法完成导出"
             echo "尝试进一步清理..."
             docker system prune -f --volumes
-            df -h
+            df -h /mnt
           fi
 
-          # 保存镜像
-          docker save -o ${SAFE_NAME}.tar ${{ github.event.inputs.image_name }}
+          # 保存镜像到 /mnt 目录
+          docker save -o ${IMAGE_FILE} ${{ github.event.inputs.image_name }}
 
       - name: Display TAR File Size
         run: |
