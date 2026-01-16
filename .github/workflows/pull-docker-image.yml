@@ -7,17 +7,6 @@ on:
         description: 'Docker 镜像名称（例如：nginx:latest）'
         required: true
         default: 'nginx:latest'
-      retention_days:
-        description: 'Artifact 保留天数（1-90天）'
-        required: false
-        default: '7'
-        type: choice
-        options:
-          - 1
-          - 7
-          - 14
-          - 30
-          - 90
 
 jobs:
   pull-and-save:
@@ -29,7 +18,6 @@ jobs:
           echo "Docker Image Puller"
           echo "=========================================="
           echo "镜像名称: ${{ github.event.inputs.image_name }}"
-          echo "保留天数: ${{ github.event.inputs.retention_days }} 天"
           echo "=========================================="
 
       - name: Pull Docker Image
@@ -58,14 +46,38 @@ jobs:
           echo "文件大小详情:"
           du -h ${{ env.IMAGE_FILE }}
 
-      - name: Upload TAR Artifact
-        uses: actions/upload-artifact@v4
+      - name: Generate Release Info
+        run: |
+          # 生成时间戳作为 Release tag
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          echo "RELEASE_TAG=docker-image-${TIMESTAMP}" >> $GITHUB_ENV
+          echo "TIMESTAMP=${TIMESTAMP}" >> $GITHUB_ENV
+
+      - name: Create Release and Upload TAR
+        uses: softprops/action-gh-release@v2
         with:
-          name: ${{ env.ARTIFACT_NAME }}
-          path: ${{ env.IMAGE_FILE }}
-          retention-days: ${{ github.event.inputs.retention_days }}
-          compression-level: 9
-          if-no-files-found: error
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: "${{ env.ARTIFACT_NAME }} - ${{ env.TIMESTAMP }}"
+          body: |
+            ## Docker 镜像导出
+
+            - **镜像名称**: `${{ github.event.inputs.image_name }}`
+            - **导出时间**: ${{ env.TIMESTAMP }}
+            - **文件大小**: ${{ env.IMAGE_FILE }}
+
+            ### 使用方法
+
+            ```bash
+            # 下载后加载镜像
+            docker load -i ${{ env.IMAGE_FILE }}
+
+            # 运行镜像
+            docker run -it ${{ github.event.inputs.image_name }}
+            ```
+          files: ${{ env.IMAGE_FILE }}
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Summary
         run: |
@@ -73,6 +85,6 @@ jobs:
           echo "✅ 任务完成!"
           echo "=========================================="
           echo "镜像已保存为: ${{ env.IMAGE_FILE }}"
-          echo "请在下方的 Artifacts 区域下载文件"
-          echo "保留期限: ${{ github.event.inputs.retention_days }} 天"
+          echo "Release Tag: ${{ env.RELEASE_TAG }}"
+          echo "请在下方的 Releases 区域下载文件"
           echo "=========================================="

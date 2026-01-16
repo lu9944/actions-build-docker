@@ -9,7 +9,7 @@ GitHub Actions 工作流，用于拉取指定的 Docker 镜像并保存为 TAR �
 
 - 拉取任意 Docker 镜像（包括私有仓库，需配置权限）
 - 自动保存为 TAR 格式文件
-- 支持设置 Artifact 保留期限
+- 自动创建 GitHub Release，方便下载和长期存储
 - 支持多架构镜像（amd64, arm64, arm/v7, ppc64le, s390x）
 - 手动触发，灵活控制
 - 自动显示镜像信息和文件大小
@@ -31,9 +31,8 @@ GitHub Actions 工作流，用于拉取指定的 Docker 镜像并保存为 TAR �
 4. 点击 **Run workflow**
 5. 输入参数：
    - **镜像名称**: 例如 `nginx:latest` 或 `gcr.io/distroless/static:latest`
-   - **保留天数**: 选择 Artifact 保留期限（1-90天）
 6. 等待执行完成
-7. 在 Actions 运行页面底部的 **Artifacts** 区域下载 TAR 文件
+7. 在仓库的 **Releases** 区域下载 TAR 文件
 
 ### 方式二：使用多架构工作流
 
@@ -48,7 +47,6 @@ GitHub Actions 工作流，用于拉取指定的 Docker 镜像并保存为 TAR �
 
 ```
 镜像名称: nginx:latest
-保留天数: 7
 ```
 
 生成的文件名: `docker-image-nginx_latest.tar`
@@ -57,7 +55,6 @@ GitHub Actions 工作流，用于拉取指定的 Docker 镜像并保存为 TAR �
 
 ```
 镜像名称: gcr.io/distroless/static:nonroot
-保留天数: 14
 ```
 
 生成的文件名: `docker-image-gcr.io_distroless_static_nonroot.tar`
@@ -67,7 +64,6 @@ GitHub Actions 工作流，用于拉取指定的 Docker 镜像并保存为 TAR �
 ```
 镜像名称: arm64v8/ubuntu:latest
 目标平台: linux/arm64
-保留天数: 30
 ```
 
 生成的文件名: `docker-image-arm64v8_ubuntu_latest-linux_arm64.tar`
@@ -99,7 +95,6 @@ docker run -it nginx:latest
 | 参数 | 必填 | 默认值 | 说明 |
 |------|------|--------|------|
 | image_name | 是 | nginx:latest | Docker 镜像名称 |
-| retention_days | 否 | 7 | Artifact 保留天数（1-90） |
 
 ### 多架构工作流 (`pull-docker-image-multiarch.yml`)
 
@@ -107,7 +102,6 @@ docker run -it nginx:latest
 |------|------|--------|------|
 | image_name | 是 | nginx:latest | Docker 镜像名称 |
 | platform | 否 | linux/amd64 | 目标平台架构 |
-| retention_days | 否 | 7 | Artifact 保留天数（1-90） |
 
 ## 支持的平台架构
 
@@ -120,16 +114,16 @@ docker run -it nginx:latest
 ## 限制说明
 
 1. **文件大小限制**:
-   - 单个 Artifact 最大 2GB
-   - 所有 Artifacts 总计最大 500GB
+   - GitHub Release 单文件最大 2GB
+   - 总存储空间取决于账户类型
 
-2. **保留期限**:
-   - GitHub 免费账户: Artifact 最多保留 90 天
-   - GitHub Pro/Team/Enterprise: 可配置更长期限
+2. **Release 存储**:
+   - Release 文件永久保存，除非手动删除
+   - 每个 Release 会创建一个 git tag
 
-3. **下载次数**:
-   - Artifact 下载次数没有限制
-   - 但会在保留期限后自动删除
+3. **下载**:
+   - Release 下载次数没有限制
+   - 支持断点续传（相比 Artifact 更稳定）
 
 ## 使用私有镜像
 
@@ -150,11 +144,17 @@ docker run -it nginx:latest
 
 ## 故障排查
 
-### 问题 1: Artifact 未出现
+### 问题 1: Release 未创建
 
 **原因**: 镜像拉取失败或保存失败
 
 **解决方法**: 检查 Actions 运行日志，确认镜像名称是否正确
+
+### 问题 2: 已存在同名 Release
+
+**原因**: 时间戳相同（极罕见）
+
+**解决方法**: 等待 1 秒后重新运行，或手动删除旧的 Release
 
 ### 问题 2: 下载的文件损坏
 
@@ -198,7 +198,7 @@ on:
 
 - [GitHub Actions 文档](https://docs.github.com/en/actions)
 - [Docker 官方文档](https://docs.docker.com/)
-- [actions/upload-artifact](https://github.com/actions/upload-artifact)
+- [softprops/action-gh-release](https://github.com/softprops/action-gh-release)
 - [docker/setup-buildx-action](https://github.com/docker/setup-buildx-action)
 
 ## 作者
