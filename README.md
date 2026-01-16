@@ -12,6 +12,7 @@ GitHub Actions 工作流，用于拉取指定的 Docker 镜像或从 Dockerfile 
 - 自动保存为 TAR 格式文件
 - 自动创建 GitHub Release，方便下载和长期存储
 - **支持同时上传到 FTP 服务器**
+- **支持上传到阿里云 OSS**
 - 支持多架构镜像（amd64, arm64, arm/v7, ppc64le, s390x）
 - 手动触发，灵活控制
 - 自动显示镜像信息和文件大小
@@ -98,6 +99,27 @@ GitHub Actions 工作流，用于拉取指定的 Docker 镜像或从 Dockerfile 
    - **构建上下文**: 默认为 `.`（Dockerfile 所在目录）
 6. 等待构建完成
 7. 在仓库的 **Releases** 区域下载 TAR 文件
+
+### 方式四：构建 Dockerfile 并上传到阿里云 OSS
+
+如果你想将构建的镜像自动上传到阿里云 OSS，使用 `.github/workflows/build-dockerfile-oss.yml`：
+
+1. 在你的仓库中创建或添加 Dockerfile
+2. 配置阿里云 OSS 访问密钥（详见 [ALIYUN_OSS_SETUP.md](ALIYUN_OSS_SETUP.md)）
+3. 在 GitHub 上进入 **Actions** 标签页
+4. 选择 **Build Dockerfile and Upload to Aliyun OSS** 工作流
+5. 点击 **Run workflow**
+6. 输入参数：
+   - **Dockerfile 路径**: 例如 `Dockerfile` 或 `./docker/Dockerfile`
+   - **镜像名称**: 例如 `myapp:v1.0`
+   - **构建上下文**: 默认为 `.`
+   - **OSS Endpoint**: 例如 `oss-cn-hangzhou.aliyuncs.com`
+   - **OSS Bucket**: 你的 Bucket 名称
+   - **OSS 路径**: 例如 `docker-images/`
+7. 等待构建和上传完成
+8. 在阿里云 OSS 控制台下载 TAR 文件
+
+📖 **详细配置指南**: 查看 [ALIYUN_OSS_SETUP.md](ALIYUN_OSS_SETUP.md) 获取完整的配置说明和故障排除。
 
 ## 使用示例
 
@@ -319,6 +341,21 @@ docker run -it nginx:latest
 | ftp_port | 否 | 21 | FTP 端口 |
 | ftp_path | 否 | / | FTP 目标路径 |
 
+### Dockerfile 构建并上传到阿里云 OSS 工作流 (`build-dockerfile-oss.yml`)
+
+| 参数 | 必填 | 默认值 | 说明 |
+|------|------|--------|------|
+| dockerfile_path | 是 | Dockerfile | Dockerfile 路径（相对于仓库根目录） |
+| image_name | 是 | myapp:latest | 构建后的镜像名称和标签 |
+| build_context | 否 | . | 构建上下文路径 |
+| oss_endpoint | 是 | oss-cn-hangzhou.aliyuncs.com | 阿里云 OSS 服务地址 |
+| oss_bucket | 是 | my-bucket | OSS Bucket 名称 |
+| oss_path | 否 | docker-images/ | OSS 存储路径 |
+| enable_release | 否 | false | 是否同时上传到 GitHub Release |
+| retention_days | 否 | 0 | 文件保留天数（0 为永久） |
+
+> **注意**：使用阿里云 OSS 工作流前，需要先配置 `ALIYUN_OSS_ACCESS_KEY_ID` 和 `ALIYUN_OSS_ACCESS_KEY_SECRET` 密钥。详见 [ALIYUN_OSS_SETUP.md](ALIYUN_OSS_SETUP.md)。
+
 > **注意**：`enable_release` 和 `enable_ftp` 可以同时启用，文件将同时上传到两个位置。
 
 ### 配置步骤
@@ -375,13 +412,21 @@ ftp_path: /docker-images/
    - GitHub Release 单文件最大 2GB
    - 总存储空间取决于账户类型
 
-2. **Release 存储**:
+2. **磁盘空间限制**:
+   - GitHub Actions runner 可用空间约 14-20GB
+   - 大型镜像（如 PyTorch CUDA >5GB）可能因空间不足失败
+   - 工作流已自动包含空间清理和检查步骤
+   - **推荐**: 对于大型镜像，使用阿里云 OSS 工作流
+
+3. **Release 存储**:
    - Release 文件永久保存，除非手动删除
    - 每个 Release 会创建一个 git tag
 
-3. **下载**:
+4. **下载**:
    - Release 下载次数没有限制
    - 支持断点续传（相比 Artifact 更稳定）
+
+> ⚠️ **磁盘空间警告**: 如果你遇到 "no space left on device" 错误，请查看 [DISK_SPACE_ISSUE.md](DISK_SPACE_ISSUE.md) 了解解决方案。对于大型镜像（>5GB），建议使用阿里云 OSS 工作流。
 
 ## 使用私有镜像
 

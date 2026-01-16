@@ -60,6 +60,17 @@ jobs:
         env:
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Check Disk Space
+        run: |
+          echo "=========================================="
+          echo "磁盘空间检查"
+          echo "=========================================="
+          df -h
+          echo ""
+          echo "Docker 磁盘使用情况:"
+          docker system df
+          echo "=========================================="
+
       - name: Pull Docker Image
         run: |
           echo "正在拉取镜像: ${{ github.event.inputs.image_name }}"
@@ -70,6 +81,15 @@ jobs:
           echo "镜像信息:"
           docker images ${{ github.event.inputs.image_name }}
 
+      - name: Clean Docker Cache
+        run: |
+          echo "清理 Docker 构建缓存以释放空间..."
+          docker builder prune -af
+          echo "清理悬挂镜像..."
+          docker image prune -f
+          echo "清理完成后的磁盘空间:"
+          df -h
+
       - name: Save Image as TAR
         run: |
           # 将镜像名称中的 / 和 : 替换为下划线，作为文件名和 artifact 名称
@@ -77,6 +97,19 @@ jobs:
           echo "IMAGE_FILE=${SAFE_NAME}.tar" >> $GITHUB_ENV
           echo "ARTIFACT_NAME=docker-image-${SAFE_NAME}" >> $GITHUB_ENV
           echo "正在保存镜像为: ${SAFE_NAME}.tar"
+
+          # 检查可用空间
+          AVAILABLE_SPACE=$(df -BG / | awk 'NR==2 {print $4}' | sed 's/G//')
+          echo "当前可用空间: ${AVAILABLE_SPACE}GB"
+
+          if [ "$AVAILABLE_SPACE" -lt 5 ]; then
+            echo "⚠️  警告: 可用磁盘空间不足 5GB，可能无法完成导出"
+            echo "尝试进一步清理..."
+            docker system prune -f --volumes
+            df -h
+          fi
+
+          # 保存镜像
           docker save -o ${SAFE_NAME}.tar ${{ github.event.inputs.image_name }}
 
       - name: Display TAR File Size
