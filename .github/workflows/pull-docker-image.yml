@@ -10,6 +10,11 @@ on:
         description: 'Docker 镜像名称（例如：nginx:latest）'
         required: true
         default: 'nginx:latest'
+      enable_release:
+        description: '是否上传到 GitHub Release'
+        required: false
+        default: true
+        type: boolean
       enable_ftp:
         description: '是否启用 FTP 上传'
         required: false
@@ -63,6 +68,7 @@ jobs:
           du -h ${{ env.IMAGE_FILE }}
 
       - name: Generate Release Info
+        if: ${{ github.event.inputs.enable_release == 'true' }}
         run: |
           # 生成时间戳作为 Release tag
           TIMESTAMP=$(date +%Y%m%d-%H%M%S)
@@ -70,6 +76,7 @@ jobs:
           echo "TIMESTAMP=${TIMESTAMP}" >> $GITHUB_ENV
 
       - name: Create Release and Upload TAR
+        if: ${{ github.event.inputs.enable_release == 'true' }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
@@ -129,6 +136,21 @@ jobs:
           echo "✅ 任务完成!"
           echo "=========================================="
           echo "镜像已保存为: ${{ env.IMAGE_FILE }}"
-          echo "Release Tag: ${{ env.RELEASE_TAG }}"
-          echo "请在下方的 Releases 区域下载文件"
+
+          # 根据 Release 开关状态显示不同信息
+          if [[ "${{ github.event.inputs.enable_release }}" == "true" ]]; then
+            echo "✅ 已上传到 GitHub Release"
+            echo "Release Tag: ${{ env.RELEASE_TAG }}"
+            echo "请在下方的 Releases 区域下载文件"
+          else
+            echo "⏭️  已跳过 GitHub Release 上传"
+          fi
+
+          # 根据 FTP 开关状态显示不同信息
+          if [[ "${{ github.event.inputs.enable_ftp }}" == "true" ]]; then
+            echo "✅ 已上传到 FTP 服务器"
+          else
+            echo "⏭️  已跳过 FTP 上传"
+          fi
+
           echo "=========================================="

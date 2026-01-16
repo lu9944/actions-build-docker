@@ -96,6 +96,7 @@ docker run -it nginx:latest
 | 参数 | 必填 | 默认值 | 说明 |
 |------|------|--------|------|
 | image_name | 是 | nginx:latest | Docker 镜像名称 |
+| enable_release | 否 | true | 是否上传到 GitHub Release |
 | enable_ftp | 否 | false | 是否启用 FTP 上传 |
 | ftp_port | 否 | 21 | FTP 端口 |
 | ftp_path | 否 | / | FTP 目标路径 |
@@ -106,11 +107,12 @@ docker run -it nginx:latest
 |------|------|--------|------|
 | image_name | 是 | nginx:latest | Docker 镜像名称 |
 | platform | 否 | linux/amd64 | 目标平台架构 |
+| enable_release | 否 | true | 是否上传到 GitHub Release |
 | enable_ftp | 否 | false | 是否启用 FTP 上传 |
 | ftp_port | 否 | 21 | FTP 端口 |
 | ftp_path | 否 | / | FTP 目标路径 |
 
-## FTP 上传配置
+> **注意**：`enable_release` 和 `enable_ftp` 可以同时启用，文件将同时上传到两个位置。
 
 ### 配置步骤
 
