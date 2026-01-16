@@ -1,0 +1,221 @@
+name: Pull Docker Image and Stream to FTP
+
+permissions:
+  contents: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_name:
+        description: 'Docker 镜像名称（例如：nginx:latest）'
+        required: true
+        default: 'nginx:latest'
+      ftp_port:
+        description: 'FTP 端口（默认：21）'
+        required: false
+        default: '21'
+      ftp_path:
+        description: 'FTP 目标路径（例如：/docker-images/）'
+        required: false
+        default: '/docker-images/'
+      compress_level:
+        description: '压缩级别（0-9，0=不压缩，9=最大压缩）'
+        required: false
+        default: '6'
+        type: choice
+        options:
+          - '0'
+          - '1'
+          - '3'
+          - '6'
+          - '9'
+      enable_vsftpd:
+        description: '使用 vsftpd 方式（部分 FTP 服务器需要）'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  streaming-upload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Display Configuration
+        run: |
+          echo "=========================================="
+          echo "Docker 镜像流式传输到 FTP"
+          echo "=========================================="
+          echo "镜像名称: ${{ github.event.inputs.image_name }}"
+          echo "FTP 端口: ${{ github.event.inputs.ftp_port }}"
+          echo "FTP 路径: ${{ github.event.inputs.ftp_path }}"
+          echo "压缩级别: ${{ github.event.inputs.compress_level }}"
+          echo "=========================================="
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME || 'dockerhub_token_user' }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+        continue-on-error: true
+        env:
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Check Disk Space (Before)
+        run: |
+          echo "=========================================="
+          echo "操作前磁盘空间"
+          echo "=========================================="
+          df -h / | grep -v "Filesystem"
+          echo "=========================================="
+
+      - name: Pull Docker Image
+        run: |
+          echo "正在拉取镜像: ${{ github.event.inputs.image_name }}"
+          docker pull ${{ github.event.inputs.image_name }}
+
+          echo ""
+          echo "镜像信息:"
+          docker images ${{ github.event.inputs.image_name }}
+
+      - name: Clean Docker Build Cache
+        run: |
+          echo "清理 Docker 构建缓存以释放空间..."
+          docker builder prune -af
+
+      - name: Stream to FTP (Direct Pipe)
+        if: ${{ github.event.inputs.enable_vsftpd == 'false' }}
+        run: |
+          # 生成安全的文件名
+          SAFE_NAME=$(echo "${{ github.event.inputs.image_name }}" | sed 's/[\/:]/_/g')
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          OUTPUT_FILE="${SAFE_NAME}-${TIMESTAMP}.tar.gz"
+
+          # 确保路径以 / 结尾
+          FTP_PATH="${{ github.event.inputs.ftp_path }}"
+          if [[ "${FTP_PATH: -1}" != "/" ]]; then
+            FTP_PATH="${FTP_PATH}/"
+          fi
+
+          echo "=========================================="
+          echo "开始流式传输到 FTP"
+          echo "=========================================="
+          echo "目标文件: ${OUTPUT_FILE}"
+          echo "完整路径: ${FTP_PATH}${OUTPUT_FILE}"
+          echo "压缩级别: ${{ github.event.inputs.compress_level }}"
+          echo "=========================================="
+
+          # 检查可用空间（需要一些临时缓存）
+          AVAILABLE_SPACE=$(df -BG / | awk 'NR==2 {print $4}' | sed 's/G//')
+          echo "当前可用空间: ${AVAILABLE_SPACE}GB"
+
+          if [ "$AVAILABLE_SPACE" -lt 2 ]; then
+            echo "❌ 错误: 可用磁盘空间不足 2GB"
+            exit 1
+          fi
+
+          # 方法 1: 直接管道传输（最省空间，但部分 FTP 服务器可能不支持）
+          # docker save -> gzip -> curl -> FTP
+          echo ""
+          echo "使用直接管道传输..."
+
+          docker save ${{ github.event.inputs.image_name }} | \
+            gzip -${{ github.event.inputs.compress_level }} | \
+            curl -T - \
+              "ftp://${{ secrets.FTP_SERVER }}:${{ github.event.inputs.ftp_port }}${FTP_PATH}${OUTPUT_FILE}" \
+              --user "${{ secrets.FTP_USERNAME }}:${{ secrets.FTP_PASSWORD }}" \
+              --ftp-create-dirs \
+              --connect-timeout 30 \
+              -v
+
+          echo ""
+          echo "=========================================="
+          echo "✅ 流式传输完成!"
+          echo "=========================================="
+
+      - name: Stream to FTP (vsftpd Compatible)
+        if: ${{ github.event.inputs.enable_vsftpd == 'true' }}
+        run: |
+          # 生成安全的文件名
+          SAFE_NAME=$(echo "${{ github.event.inputs.image_name }}" | sed 's/[\/:]/_/g')
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          OUTPUT_FILE="${SAFE_NAME}-${TIMESTAMP}.tar.gz"
+
+          # 确保路径以 / 结尾
+          FTP_PATH="${{ github.event.inputs.ftp_path }}"
+          if [[ "${FTP_PATH: -1}" != "/" ]]; then
+            FTP_PATH="${FTP_PATH}/"
+          fi
+
+          echo "=========================================="
+          echo "使用 vsftpd 兼容模式流式传输"
+          echo "=========================================="
+
+          # 检查可用空间
+          AVAILABLE_SPACE=$(df -BG / | awk 'NR==2 {print $4}' | sed 's/G//')
+          echo "当前可用空间: ${AVAILABLE_SPACE}GB"
+
+          if [ "$AVAILABLE_SPACE" -lt 3 ]; then
+            echo "❌ 错误: 可用磁盘空间不足 3GB"
+            exit 1
+          fi
+
+          # 方法 2: 使用 /dev/shm 内存文件系统（需要少量内存作为缓存）
+          # 这比直接管道更稳定，兼容更多 FTP 服务器
+          echo ""
+          echo "使用内存文件系统作为缓存..."
+
+          # 检查 /dev/shm 空间
+          SHM_SIZE=$(df -BG /dev/shm | awk 'NR==2 {print $2}' | sed 's/G//')
+          echo "内存文件系统大小: ${SHM_SIZE}GB"
+
+          docker save ${{ github.event.inputs.image_name }} | \
+            gzip -${{ github.event.inputs.compress_level }} > \
+            /dev/shm/${OUTPUT_FILE}
+
+          echo "压缩后文件大小:"
+          ls -lh /dev/shm/${OUTPUT_FILE} | awk '{print $5}'
+
+          # 上传到 FTP
+          curl -T "/dev/shm/${OUTPUT_FILE}" \
+            "ftp://${{ secrets.FTP_SERVER }}:${{ github.event.inputs.ftp_port }}${FTP_PATH}${OUTPUT_FILE}" \
+            --user "${{ secrets.FTP_USERNAME }}:${{ secrets.FTP_PASSWORD }}" \
+            --ftp-create-dirs \
+            --connect-timeout 30 \
+            -v
+
+          # 立即删除临时文件
+          rm -f /dev/shm/${OUTPUT_FILE}
+
+          echo ""
+          echo "=========================================="
+          echo "✅ 流式传输完成! 临时文件已清理"
+          echo "=========================================="
+
+      - name: Display Disk Space (After)
+        run: |
+          echo "=========================================="
+          echo "操作后磁盘空间"
+          echo "=========================================="
+          df -h / | grep -v "Filesystem"
+          echo "=========================================="
+
+      - name: Clean Docker Image
+        if: always()
+        run: |
+          echo "清理已拉取的镜像以释放空间..."
+          docker rmi ${{ github.event.inputs.image_name }} || true
+          docker image prune -f
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "=========================================="
+          if [ "${{ job.status }}" == "success" ]; then
+            echo "✅ 任务完成!"
+          else
+            echo "❌ 任务失败"
+          fi
+          echo "=========================================="
+          echo "镜像: ${{ github.event.inputs.image_name }}"
+          echo "传输模式: ${{ github.event.inputs.enable_vsftpd == 'true' && 'vsftpd 兼容（内存缓存）' || '直接管道（最小磁盘占用）' }}"
+          echo "压缩级别: ${{ github.event.inputs.compress_level }}"
+          echo "=========================================="
