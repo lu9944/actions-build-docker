@@ -128,22 +128,141 @@ GitHub Actions 工作流，用于拉取指定的 Docker 镜像或从 Dockerfile 
 
 ### 示例 4: 从 Dockerfile 构建自定义镜像
 
-假设你的仓库中有以下 Dockerfile：
+#### 方式 A：使用仓库中的示例项目
+
+仓库中包含了一个完整的示例项目（位于 `examples/simple-webapp/`）。
+
+**步骤 1：查看示例文件**
+
+```bash
+examples/simple-webapp/
+├── Dockerfile       # Nginx Web 应用的 Dockerfile
+├── index.html       # 自定义网页
+└── README.md        # 示例说明
+```
+
+**步骤 2：运行 GitHub Actions 构建**
+
+1. 进入 GitHub 仓库的 **Actions** 标签页
+2. 选择 **Build Dockerfile and Save as TAR** 工作流
+3. 点击 **Run workflow**
+4. 填写以下参数：
+
+```
+Dockerfile 路径: examples/simple-webapp/Dockerfile
+镜像名称: example-webapp:v1.0
+构建上下文: examples/simple-webapp
+```
+
+5. 点击 **Run workflow** 开始构建
+
+**步骤 3：下载并使用**
+
+等待构建完成后（约 1-3 分钟）：
+
+```bash
+# 1. 从 Releases 下载 tar 文件
+# 2. 加载镜像到本地 Docker
+docker load -i docker-image-example-webapp_v1.0.tar
+
+# 3. 运行容器
+docker run -d -p 8080:80 --name my-webapp example-webapp:v1.0
+
+# 4. 访问网页
+# 打开浏览器访问 http://localhost:8080
+```
+
+**生成的文件名**: `docker-image-example-webapp_v1.0.tar`
+
+#### 方式 B：构建自己的 Dockerfile
+
+**步骤 1：创建 Dockerfile**
+
+在你的仓库根目录创建 `Dockerfile`：
 
 ```dockerfile
 FROM nginx:alpine
 COPY index.html /usr/share/nginx/html/
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]
 ```
 
-运行工作流时输入：
+**步骤 2：创建 index.html**
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+    <title>My App</title>
+</head>
+<body>
+    <h1>Hello from Docker!</h1>
+</body>
+</html>
+```
+
+**步骤 3：运行工作流**
+
+在 Actions 中填写参数：
 
 ```
 Dockerfile 路径: Dockerfile
-镜像名称: my-nginx:custom
+镜像名称: my-app:v1.0
 构建上下文: .
 ```
 
-生成的文件名: `docker-image-my-nginx_custom.tar`
+**生成的文件名**: `docker-image-my-app_v1.0.tar`
+
+#### 参数说明
+
+| 参数 | 说明 | 示例 |
+|------|------|------|
+| `dockerfile_path` | Dockerfile 的路径（相对于仓库根目录） | `Dockerfile` 或 `examples/simple-webapp/Dockerfile` |
+| `image_name` | 构建后的镜像名称和标签 | `myapp:latest` 或 `example-webapp:v1.0` |
+| `build_context` | 构建上下文路径（Dockerfile 中 COPY 的基准目录） | `.` 或 `examples/simple-webapp` |
+
+#### 重要提示
+
+**构建上下文（build_context）的选择**：
+- 如果 Dockerfile 在仓库根目录，使用 `.`
+- 如果 Dockerfile 在子目录中，使用该子目录路径
+- Dockerfile 中的 `COPY` 命令是相对于构建上下文的
+
+**示例对比**：
+
+```
+情况 1：Dockerfile 在根目录
+├── Dockerfile
+└── index.html
+参数：dockerfile_path=Dockerfile, build_context=.
+
+情况 2：Dockerfile 在子目录
+├── examples/
+│   └── simple-webapp/
+│       ├── Dockerfile
+│       └── index.html
+参数：dockerfile_path=examples/simple-webapp/Dockerfile, build_context=examples/simple-webapp
+```
+
+#### 本地测试
+
+在运行 GitHub Actions 之前，你可以先在本地测试：
+
+```bash
+# 进入构建上下文目录
+cd examples/simple-webapp
+
+# 构建镜像
+docker build -t test-app:v1.0 .
+
+# 运行容器
+docker run -d -p 8080:80 test-app:v1.0
+
+# 访问测试
+curl http://localhost:8080
+```
+
+本地测试成功后，再使用 GitHub Actions 构建。
 
 ## 本地加载镜像
 
