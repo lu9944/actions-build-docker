@@ -1,0 +1,96 @@
+name: Pull Docker Image (Multi-Architecture)
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_name:
+        description: 'Docker 镜像名称（例如：nginx:latest）'
+        required: true
+        default: 'nginx:latest'
+      platform:
+        description: '目标平台架构'
+        required: false
+        default: 'linux/amd64'
+        type: choice
+        options:
+          - linux/amd64
+          - linux/arm64
+          - linux/arm/v7
+          - linux/ppc64le
+          - linux/s390x
+      retention_days:
+        description: 'Artifact 保留天数（1-90天）'
+        required: false
+        default: '7'
+        type: choice
+        options:
+          - 1
+          - 7
+          - 14
+          - 30
+          - 90
+
+jobs:
+  pull-and-save:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Display Configuration
+        run: |
+          echo "=========================================="
+          echo "Docker Image Puller (Multi-Arch)"
+          echo "=========================================="
+          echo "镜像名称: ${{ github.event.inputs.image_name }}"
+          echo "目标平台: ${{ github.event.inputs.platform }}"
+          echo "保留天数: ${{ github.event.inputs.retention_days }} 天"
+          echo "=========================================="
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Pull Docker Image
+        run: |
+          echo "正在拉取镜像: ${{ github.event.inputs.image_name }}"
+          echo "目标平台: ${{ github.event.inputs.platform }}"
+          docker pull --platform ${{ github.event.inputs.platform }} ${{ github.event.inputs.image_name }}
+
+      - name: Display Image Details
+        run: |
+          echo "镜像信息:"
+          docker images ${{ github.event.inputs.image_name }}
+
+      - name: Save Image as TAR
+        run: |
+          # 将镜像名称中的 / 和 : 替换为下划线，作为文件名
+          IMAGE_FILE=$(echo "${{ github.event.inputs.image_name }}" | sed 's/[\/:]/_/g')
+          # 将平台名称中的 / 替换为下划线
+          PLATFORM=$(echo "${{ github.event.inputs.platform }}" | sed 's/\//_/g')
+          echo "IMAGE_FILE=${IMAGE_FILE}_${PLATFORM}.tar" >> $GITHUB_ENV
+          echo "正在保存镜像为: ${IMAGE_FILE}_${PLATFORM}.tar"
+          docker save -o ${IMAGE_FILE}_${PLATFORM}.tar ${{ github.event.inputs.image_name }}
+
+      - name: Display TAR File Size
+        run: |
+          echo "TAR 文件信息:"
+          ls -lh ${{ env.IMAGE_FILE }}
+          echo "文件大小详情:"
+          du -h ${{ env.IMAGE_FILE }}
+
+      - name: Upload TAR Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image-${{ github.event.inputs.image_name }}-${{ github.event.inputs.platform }}
+          path: ${{ env.IMAGE_FILE }}
+          retention-days: ${{ github.event.inputs.retention_days }}
+          compression-level: 9
+          if-no-files-found: error
+
+      - name: Summary
+        run: |
+          echo "=========================================="
+          echo "✅ 任务完成!"
+          echo "=========================================="
+          echo "镜像已保存为: ${{ env.IMAGE_FILE }}"
+          echo "平台架构: ${{ github.event.inputs.platform }}"
+          echo "请在下方的 Artifacts 区域下载文件"
+          echo "保留期限: ${{ github.event.inputs.retention_days }} 天"
+          echo "=========================================="
