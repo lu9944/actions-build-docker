@@ -130,6 +130,12 @@ jobs:
           echo "清理完成后的磁盘空间:"
           df -h
 
+      - name: Setup /mnt Permissions
+        run: |
+          echo "设置 /mnt 目录权限..."
+          sudo chmod 777 /mnt
+          ls -ld /mnt
+
       - name: Save Image as TAR
         run: |
           # 将镜像名称中的 / 和 : 替换为下划线，作为文件名和 artifact 名称
