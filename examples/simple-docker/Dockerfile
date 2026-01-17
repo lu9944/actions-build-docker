@@ -86,9 +86,8 @@ RUN CONDA_BIN="/opt/conda/bin" \
     && export PATH=$CONDA_BIN:$PATH \
     # 创建名为ddddocr_env的conda环境（指定python版本，兼容依赖）
     && conda create -y -n ddddocr_env python=3.10 \
-    # 激活环境并安装指定依赖包（使用官方源）
-    && source activate ddddocr_env \
-    && conda install -y \
+    # 使用conda run在指定环境中安装依赖包（避免source命令问题）
+    && conda install -y -n ddddocr_env \
         fire \
         loguru \
         pyyaml \
@@ -100,7 +99,6 @@ RUN CONDA_BIN="/opt/conda/bin" \
         onnxscript \
     # 清理conda缓存减小镜像体积
     && conda clean -y --all \
-    && CONDA_BIN="" \
     # 将环境激活命令写入bashrc，容器启动后默认激活该环境
     && echo "source /opt/conda/bin/activate ddddocr_env" >> /etc/bash.bashrc
 
