@@ -12,7 +12,7 @@
 
 ### 步骤 1：将此示例添加到你的仓库
 
-1. 复制 `simple-webapp` 文件夹到你的仓库根目录
+1. 复制 `simple-docker` 文件夹到你的仓库根目录
 2. 确保 `Dockerfile` 和 `index.html` 都在仓库中
 
 ### 步骤 2：运行工作流
@@ -21,9 +21,9 @@
 2. 选择 **Build Dockerfile and Save as TAR** 工作流
 3. 点击 **Run workflow**
 4. 填写以下参数：
-   - **Dockerfile 路径**: `examples/simple-webapp/Dockerfile`
-   - **镜像名称**: `example-webapp:v1.0`
-   - **构建上下文**: `examples/simple-webapp`
+   - **Dockerfile 路径**: `examples/simple-docker/Dockerfile`
+   - **镜像名称**: `pytorch:2.9.0-cuda12.6-cudnn9-devel`
+   - **构建上下文**: `./`
    - **是否上传到 GitHub Release**: ✅ 勾选
 5. 点击 **Run workflow** 开始构建
 
