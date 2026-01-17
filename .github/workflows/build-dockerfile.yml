@@ -147,34 +147,55 @@ jobs:
 
       - name: Clean Docker Cache Before Save
         run: |
-          echo "清理 Docker 构建缓存以释放空间..."
+          echo "=========================================="
+          echo "深度清理 Docker 系统以释放最大空间"
+          echo "=========================================="
+          # 清理构建缓存
           docker builder prune -af
-          echo "清理悬挂镜像..."
-          docker image prune -f
+          # 清理所有未使用的镜像
+          docker image prune -af
+          # 清理所有未使用的容器、网络、卷
+          docker system prune -af --volumes
           echo "清理完成后的磁盘空间:"
           df -h
+          echo "=========================================="
 
       - name: Save Image as TAR
         run: |
           # 将镜像名称中的 / 和 : 替换为下划线，作为文件名
           SAFE_NAME=$(echo "${{ github.event.inputs.image_name }}" | sed 's/[\/:]/_/g')
-          echo "IMAGE_FILE=${SAFE_NAME}.tar" >> $GITHUB_ENV
+          # 保存到 /mnt 目录（GitHub Actions 额外磁盘空间，约 14GB）
+          IMAGE_FILE="/mnt/${SAFE_NAME}.tar.gz"
+          echo "IMAGE_FILE=${IMAGE_FILE}" >> $GITHUB_ENV
           echo "ARTIFACT_NAME=docker-image-${SAFE_NAME}" >> $GITHUB_ENV
-          echo "正在保存镜像为: ${SAFE_NAME}.tar"
+          echo "正在保存镜像为: ${IMAGE_FILE} (使用 gzip 压缩)"
 
-          # 检查可用空间
-          AVAILABLE_SPACE=$(df -BG / | awk 'NR==2 {print $4}' | sed 's/G//')
-          echo "当前可用空间: ${AVAILABLE_SPACE}GB"
+          # 显示各个挂载点的磁盘空间
+          echo "=== 磁盘空间信息 ==="
+          df -h | grep -E "(/mnt|Filesystem|/dev/)"
+          echo "=================="
 
-          if [ "$AVAILABLE_SPACE" -lt 5 ]; then
-            echo "⚠️  警告: 可用磁盘空间不足 5GB，可能无法完成导出"
-            echo "尝试进一步清理..."
-            docker system prune -f --volumes
-            df -h
+          # 显示镜像大小信息
+          IMAGE_SIZE=$(docker inspect ${{ github.event.inputs.image_name }} --format='{{.Size}}' | awk '{print int($1/1024/1024/1024)}')
+          echo "镜像大小: ${IMAGE_SIZE}GB"
+
+          # 检查 /mnt 目录的可用空间
+          AVAILABLE_SPACE=$(df -BG /mnt | awk 'NR==2 {print $4}' | sed 's/G//')
+          echo "/mnt 可用空间: ${AVAILABLE_SPACE}GB"
+
+          # 计算所需空间（镜像大小 * 1.5，因为使用压缩）
+          REQUIRED_SPACE=$((IMAGE_SIZE + IMAGE_SIZE / 2))
+          echo "预估需要空间: ${REQUIRED_SPACE}GB"
+
+          if [ "$AVAILABLE_SPACE" -lt "$REQUIRED_SPACE" ]; then
+            echo "❌ 错误: /mnt 磁盘空间不足"
+            echo "需要: ${REQUIRED_SPACE}GB, 可用: ${AVAILABLE_SPACE}GB"
+            echo "建议: 镜像太大，即使使用 /mnt 目录也不够"
+            exit 1
           fi
 
-          # 保存镜像
-          docker save -o ${SAFE_NAME}.tar ${{ github.event.inputs.image_name }}
+          # 使用 gzip 压缩保存镜像到 /mnt（节省空间）
+          docker save ${{ github.event.inputs.image_name }} | gzip > ${IMAGE_FILE}
 
       - name: Display TAR File Size
         run: |
@@ -211,8 +232,11 @@ jobs:
             ### 使用方法
 
             ```bash
-            # 下载后加载镜像
+            # 下载后加载镜像（支持 .tar.gz 压缩格式）
             docker load -i ${{ env.IMAGE_FILE }}
+
+            # 或者先解压再加载
+            gunzip -c ${{ env.IMAGE_FILE }} | docker load
 
             # 运行镜像
             docker run -it ${{ github.event.inputs.image_name }}
@@ -282,7 +306,9 @@ jobs:
           echo "=========================================="
           echo ""
           echo "📦 离线使用方法:"
-          echo "1. 下载 TAR 文件"
+          echo "1. 下载 TAR.GZ 文件（gzip 压缩格式）"
           echo "2. 运行: docker load -i ${{ env.IMAGE_FILE }}"
           echo "3. 运行: docker run -it ${{ github.event.inputs.image_name }}"
+          echo ""
+          echo "💡 提示: docker load 原生支持 .tar.gz 格式"
           echo "=========================================="
