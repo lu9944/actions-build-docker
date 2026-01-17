@@ -4,16 +4,19 @@ FROM pytorch/pytorch:2.9.0-cuda12.6-cudnn9-devel
 RUN set -eux \
     # 更新包列表
     apt update -y \
-    # 安装系统依赖
+    # 安装系统依赖（确保包含curl和wget）
     apt install -y --no-install-recommends \
-        build-essential iputils-ping net-tools iproute2 curl dnsutils tcpdump netcat-openbsd \
+        build-essential iputils-ping net-tools iproute2 curl wget dnsutils tcpdump netcat-openbsd \
         vim sudo unzip zip screen libgl1-mesa-glx htop git openssh-server libsm6 libxext6 \
-        ninja-build libglib2.0-0 libxrender-dev gcc g++ make cmake file wget \
+        ninja-build libglib2.0-0 libxrender-dev gcc g++ make cmake file \
+    # 验证curl和wget已安装
+    command -v curl || (echo "ERROR: curl not installed" && exit 1) \
+    && command -v wget || (echo "ERROR: wget not installed" && exit 1) \
     # 安装python3-pip
-    apt install -y python3-pip \
+    && apt install -y python3-pip \
     # 清理缓存减小镜像体积
-    apt clean \
-    rm -rf /var/lib/apt/lists/*
+    && apt clean \
+    && rm -rf /var/lib/apt/lists/*
 
 # ========== pip安装 ==========
 RUN set -eux \
@@ -22,10 +25,20 @@ RUN set -eux \
 
 WORKDIR /usr/local/src
 
-# 使用你指定的Miniconda最新版官方下载地址
-RUN curl -L -o Miniconda3.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh && \
-    /bin/bash Miniconda3.sh -b -p /opt/conda && \
-    rm Miniconda3.sh
+# 下载并安装Miniconda
+RUN set -eux \
+    # 验证curl可用
+    && command -v curl || (echo "ERROR: curl not found" && exit 1) \
+    # 下载Miniconda安装包
+    && curl -fL -o Miniconda3.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh \
+    # 验证文件下载成功
+    && ls -lh Miniconda3.sh \
+    # 安装Miniconda
+    && /bin/bash Miniconda3.sh -b -p /opt/conda \
+    # 清理安装包
+    && rm Miniconda3.sh \
+    # 验证conda安装成功
+    && /opt/conda/bin/conda --version
 
 # 创建conda环境并安装依赖（完全使用官方源，不换源）
 RUN CONDA_BIN="/opt/conda/bin" \
