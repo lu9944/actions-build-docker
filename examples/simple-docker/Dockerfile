@@ -84,10 +84,10 @@ RUN set -eux \
 # 创建conda环境并安装依赖（完全使用官方源，不换源）
 RUN CONDA_BIN="/opt/conda/bin" \
     && export PATH=$CONDA_BIN:$PATH \
-    # 创建名为ddddocr_env的conda环境（指定python版本，兼容依赖）
-    && conda create -y -n ddddocr_env python=3.10 \
+    # 创建名为pytorch_env的conda环境（指定python版本，兼容依赖）
+    && conda create -y -n pytorch_env python=3.10 \
     # 使用conda run在指定环境中安装依赖包（避免source命令问题）
-    && conda install -y -n ddddocr_env \
+    && conda install -y -n pytorch_env \
         fire \
         loguru \
         pyyaml \
@@ -100,10 +100,10 @@ RUN CONDA_BIN="/opt/conda/bin" \
     # 清理conda缓存减小镜像体积
     && conda clean -y --all \
     # 将环境激活命令写入bashrc，容器启动后默认激活该环境
-    && echo "source /opt/conda/bin/activate ddddocr_env" >> /etc/bash.bashrc
+    && echo "source /opt/conda/bin/activate pytorch_env" >> /etc/bash.bashrc
 
 # 将conda加入全局PATH，确保环境激活命令可用
 ENV PATH="/opt/conda/bin:${PATH}"
 
 # 设置默认激活环境的环境变量（增强兼容性）
-ENV CONDA_DEFAULT_ENV="ddddocr_env"
+ENV CONDA_DEFAULT_ENV="pytorch_env"
