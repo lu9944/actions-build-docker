@@ -221,6 +221,8 @@ jobs:
           # 显示镜像大小信息
           IMAGE_SIZE=$(docker inspect ${{ github.event.inputs.image_name }} --format='{{.Size}}' | awk '{print int($1/1024/1024/1024)}')
           echo "镜像大小: ${IMAGE_SIZE}GB"
+          echo "根分区可用: $(df -h / | awk 'NR==2 {print $4}')"
+          echo "/mnt 分区可用: $(df -h /mnt | awk 'NR==2 {print $4}')"
 
           # 检查 /mnt 目录的可用空间
           AVAILABLE_SPACE=$(df -BG /mnt | awk 'NR==2 {print $4}' | sed 's/G//')
@@ -237,8 +239,10 @@ jobs:
             exit 1
           fi
 
-          # 保存镜像到 /mnt（不压缩）
-          docker save -o ${IMAGE_FILE} ${{ github.event.inputs.image_name }}
+          echo ""
+          echo "开始导出镜像（使用管道直接写入 /mnt，避免临时文件占用根分区）..."
+          # 使用管道方式保存，避免在 /var/lib/docker/tmp 创建临时文件
+          docker save ${{ github.event.inputs.image_name }} > ${IMAGE_FILE}
 
       - name: Display TAR File Size
         run: |
