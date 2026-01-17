@@ -99,6 +99,8 @@ RUN CONDA_BIN="/opt/conda/bin" \
         onnxscript \
     # 清理conda缓存减小镜像体积
     && conda clean -y --all \
+    # 修复环境权限，允许所有用户写入（支持非root用户运行容器）
+    && chmod -R a+w /opt/conda/envs/pytorch_env/lib/python*/site-packages/ \
     # 将环境激活命令写入bashrc，容器启动后默认激活该环境
     && echo "source /opt/conda/bin/activate pytorch_env" >> /etc/bash.bashrc
 
