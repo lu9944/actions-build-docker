@@ -175,14 +175,14 @@ jobs:
       - name: Clean Docker Cache Before Save
         run: |
           echo "=========================================="
-          echo "深度清理 Docker 系统以释放最大空间"
+          echo "清理 Docker 系统以释放空间（保留构建好的镜像）"
           echo "=========================================="
           # 清理构建缓存
           docker builder prune -af
-          # 清理所有未使用的镜像
-          docker image prune -af
-          # 清理所有未使用的容器、网络、卷
-          docker system prune -af --volumes
+          # 只清理悬挂镜像（dangling），不删除所有未使用的镜像
+          docker image prune -f
+          # 清理未使用的容器、网络（不清理卷，避免影响数据）
+          docker system prune -f
           # 设置 /mnt 目录权限（允许当前用户写入）
           sudo mkdir -p /mnt
           sudo chmod 777 /mnt
