@@ -23,9 +23,9 @@ RUN set -eux \
 WORKDIR /usr/local/src
 
 # 使用你指定的Miniconda最新版官方下载地址
-RUN wget --no-check-certificate https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh && \
-    /bin/bash /usr/local/src/Miniconda3-latest-Linux-x86_64.sh -b -p /opt/conda && \
-    rm /usr/local/src/Miniconda3-latest-Linux-x86_64.sh
+RUN curl -L -o Miniconda3.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh && \
+    /bin/bash Miniconda3.sh -b -p /opt/conda && \
+    rm Miniconda3.sh
 
 # 创建conda环境并安装依赖（完全使用官方源，不换源）
 RUN CONDA_BIN="/opt/conda/bin" \
