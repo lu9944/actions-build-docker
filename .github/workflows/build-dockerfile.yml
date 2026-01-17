@@ -156,12 +156,28 @@ jobs:
           docker image prune -af
           # 清理所有未使用的容器、网络、卷
           docker system prune -af --volumes
+          # 设置 /mnt 目录权限（允许当前用户写入）
+          sudo mkdir -p /mnt
+          sudo chmod 777 /mnt
           echo "清理完成后的磁盘空间:"
           df -h
           echo "=========================================="
 
       - name: Save Image as TAR
         run: |
+          # 验证镜像是否存在
+          echo "检查镜像是否存在: ${{ github.event.inputs.image_name }}"
+          if ! docker inspect ${{ github.event.inputs.image_name }} >/dev/null 2>&1; then
+            echo "❌ 错误: 镜像 ${{ github.event.inputs.image_name }} 不存在"
+            echo ""
+            echo "可用的镜像列表:"
+            docker images --format "table {{.Repository}}:{{.Tag}}\t{{.Size}}\t{{.CreatedAt}}"
+            echo ""
+            echo "请检查构建步骤是否成功完成"
+            exit 1
+          fi
+          echo "✅ 镜像存在，继续导出"
+
           # 将镜像名称中的 / 和 : 替换为下划线，作为文件名
           SAFE_NAME=$(echo "${{ github.event.inputs.image_name }}" | sed 's/[\/:]/_/g')
           # 保存到 /mnt 目录（GitHub Actions 额外磁盘空间，约 14GB）
