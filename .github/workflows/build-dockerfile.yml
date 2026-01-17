@@ -71,6 +71,31 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Configure Docker Data Directory to /mnt
+        run: |
+          echo "=========================================="
+          echo "配置 Docker 数据目录到 /mnt（解决根分区空间不足问题）"
+          echo "=========================================="
+          # 停止 Docker daemon
+          sudo systemctl stop docker docker.socket containerd
+          # 创建 /mnt/docker 目录
+          sudo mkdir -p /mnt/docker
+          # 备份现有 Docker 数据
+          if [ -d /var/lib/docker ] && [ ! -L /var/lib/docker ]; then
+            echo "移动现有 Docker 数据到 /mnt/docker..."
+            sudo mv /var/lib/docker/* /mnt/docker/ 2>/dev/null || true
+          fi
+          # 配置 Docker daemon 使用 /mnt/docker
+          echo '{"data-root": "/mnt/docker"}' | sudo tee /etc/docker/daemon.json
+          # 重新启动 Docker
+          sudo systemctl start docker
+          # 验证配置
+          echo "Docker 数据根目录:"
+          docker info | grep "Docker Root Dir"
+          echo "磁盘使用情况:"
+          df -h /mnt/docker
+          echo "=========================================="
+
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
