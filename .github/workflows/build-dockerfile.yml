@@ -9,7 +9,7 @@ on:
       dockerfile_path:
         description: 'Dockerfile 路径（相对于仓库根目录，例如：Dockerfile 或 ./docker/Dockerfile）'
         required: true
-        default: 'Dockerfile'
+        default: 'examples/simple-docker/Dockerfile'
       image_name:
         description: '构建后的镜像名称和标签（例如：myapp:latest）'
         required: true
@@ -17,16 +17,16 @@ on:
       build_context:
         description: '构建上下文路径（默认为 Dockerfile 所在目录）'
         required: false
-        default: '.'
+        default: 'examples/simple-docker'
       enable_release:
         description: '是否上传到 GitHub Release'
         required: false
-        default: true
+        default: false
         type: boolean
       enable_ftp:
         description: '是否启用 FTP 上传'
         required: false
-        default: false
+        default: true
         type: boolean
       ftp_port:
         description: 'FTP 端口（默认：21）'
