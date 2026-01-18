@@ -2,9 +2,9 @@ FROM pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel
 
 # ========== 构建参数 ==========
 # conda 环境名称（可根据需要修改）
-ARG CONDA_ENV_NAME=pytorch_env
+ARG CONDA_ENV_NAME=ddddocr_env_v2
 # Python 版本（可根据需要修改）
-ARG PYTHON_VERSION=3.10
+ARG PYTHON_VERSION=3.11
 
 # 验证可用
 # ========== 安装系统依赖 ==========
