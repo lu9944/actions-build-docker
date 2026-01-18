@@ -1,5 +1,5 @@
 FROM pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel
-
+# 验证可用
 # ========== 安装系统依赖 ==========
 RUN set -eux \
     # 检查基础镜像系统信息
