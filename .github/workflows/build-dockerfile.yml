@@ -381,6 +381,58 @@ jobs:
             docker tag "$LOCAL_IMAGE" "$HUB_IMAGE"
           fi
 
+          # 在推送前设置仓库可见性
+          echo ""
+          echo "=========================================="
+          echo "设置仓库可见性为: $VISIBILITY"
+          echo "=========================================="
+
+          # 解析镜像名称（去除 tag，获取 namespace/repo）
+          # 例如: username/myapp:latest -> username/myapp
+          REPO_PATH=$(echo "$HUB_IMAGE" | cut -d':' -f1)
+
+          echo "仓库路径: $REPO_PATH"
+          echo "目标可见性: $VISIBILITY"
+          echo ""
+
+          # 检查镜像名称格式
+          if [[ ! "$REPO_PATH" =~ .+/.+ ]]; then
+            echo "⚠️  警告: 镜像名称格式不正确，跳过设置可见性"
+            echo "   正确格式应为: username/reponame"
+          else
+            echo "正在调用 Docker Hub API..."
+
+            # 调用 Docker Hub API 设置可见性
+            API_RESPONSE=$(curl -s -w "\n%{http_code}" -X PATCH \
+              "https://hub.docker.com/v2/repositories/${REPO_PATH}/" \
+              -H "Authorization: Bearer ${{ secrets.DOCKERHUB_TOKEN }}" \
+              -H "Content-Type: application/json" \
+              -d "{\"visibility\": \"${VISIBILITY}\"}")
+
+            # 分离响应体和状态码
+            HTTP_CODE=$(echo "$API_RESPONSE" | tail -n1)
+            RESPONSE_BODY=$(echo "$API_RESPONSE" | head -n-1)
+
+            echo "HTTP 状态码: $HTTP_CODE"
+            echo "API 响应: $RESPONSE_BODY"
+            echo ""
+
+            if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "202" ]; then
+              echo "✅ 仓库可见性已成功设置为: $VISIBILITY"
+            else
+              echo "⚠️  设置可见性失败 (HTTP $HTTP_CODE)"
+              echo ""
+              echo "可能的原因:"
+              echo "1. Token 权限不足（需要 Read & Write 权限）"
+              echo "2. 仓库不存在（需要先推送一次才会创建）"
+              echo "3. Token 格式不正确"
+              echo ""
+              echo "尝试先推送镜像，然后再设置可见性..."
+            fi
+          fi
+
+          echo "=========================================="
+          echo ""
           echo "开始推送镜像到 Docker Hub..."
           echo "=========================================="
 
@@ -404,45 +456,80 @@ jobs:
           echo "✅ 推送成功！"
           echo "=========================================="
 
-          # 设置仓库可见性
+          # 推送后再次验证并设置可见性（如果之前失败）
           echo ""
-          echo "设置仓库可见性为: $VISIBILITY"
+          echo "=========================================="
+          echo "验证并设置仓库可见性"
+          echo "=========================================="
 
-          # 解析镜像名称（去除 tag，获取 namespace/repo）
-          # 例如: username/myapp:latest -> username/myapp
           REPO_PATH=$(echo "$HUB_IMAGE" | cut -d':' -f1)
 
-          # 检查镜像名称格式（简单验证：包含斜杠且不为空）
-          if [[ ! "$REPO_PATH" =~ .+/.+ ]]; then
-            echo "⚠️  警告: 镜像名称格式可能不正确，跳过设置可见性"
-            echo "   正确格式应为: username/reponame"
+          echo "正在查询当前仓库状态..."
+
+          # 先查询当前状态
+          QUERY_RESPONSE=$(curl -s -w "\n%{http_code}" \
+            "https://hub.docker.com/v2/repositories/${REPO_PATH}/" \
+            -H "Authorization: Bearer ${{ secrets.DOCKERHUB_TOKEN }}")
+
+          QUERY_CODE=$(echo "$QUERY_RESPONSE" | tail -n1)
+          QUERY_BODY=$(echo "$QUERY_RESPONSE" | head -n-1)
+
+          echo "查询 HTTP 状态码: $QUERY_CODE"
+
+          # 提取当前的 visibility
+          if echo "$QUERY_BODY" | grep -q '"visibility"'; then
+            CURRENT_VISIBILITY=$(echo "$QUERY_BODY" | grep -o '"visibility":"[^"]*"' | cut -d':' -f2 | tr -d '"')
+            echo "当前仓库可见性: $CURRENT_VISIBILITY"
           else
-            # 调用 Docker Hub API 设置可见性
-            API_RESPONSE=$(curl -s -X PATCH \
-              "https://hub.docker.com/v2/repositories/${REPO_PATH}/" \
-              -H "Authorization: Bearer ${{ secrets.DOCKERHUB_TOKEN }}" \
-              -H "Content-Type: application/json" \
-              -d "{\"visibility\": \"${VISIBILITY}\"}" \
-              -w "\n%{http_code}")
-
-            # 分离响应体和状态码
-            HTTP_CODE=$(echo "$API_RESPONSE" | tail -n1)
-            RESPONSE_BODY=$(echo "$API_RESPONSE" | head -n-1)
-
-            if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "202" ]; then
-              echo "✅ 仓库可见性已设置为: $VISIBILITY"
-            else
-              echo "⚠️  设置可见性失败 (HTTP $HTTP_CODE)"
-              echo "响应: $RESPONSE_BODY"
-              echo "提示: 仓库可能已设置为此可见性，或 Token 权限不足"
-            fi
+            echo "无法查询当前状态"
           fi
 
           echo ""
+          echo "目标可见性: $VISIBILITY"
+
+          # 如果当前状态与目标不一致，则设置
+          if [ "$CURRENT_VISIBILITY" = "$VISIBILITY" ]; then
+            echo "✅ 仓库已经是 $VISIBILITY 状态，无需修改"
+          else
+            echo "正在更新仓库可见性..."
+
+            # 使用 PATCH 更新可见性
+            UPDATE_RESPONSE=$(curl -s -w "\n%{http_code}" -X PATCH \
+              "https://hub.docker.com/v2/repositories/${REPO_PATH}/" \
+              -H "Authorization: Bearer ${{ secrets.DOCKERHUB_TOKEN }}" \
+              -H "Content-Type: application/json" \
+              -d "{\"visibility\": \"${VISIBILITY}\"}")
+
+            UPDATE_CODE=$(echo "$UPDATE_RESPONSE" | tail -n1)
+            UPDATE_BODY=$(echo "$UPDATE_RESPONSE" | head -n-1)
+
+            echo "更新 HTTP 状态码: $UPDATE_CODE"
+            echo "API 响应: $UPDATE_BODY"
+
+            if [ "$UPDATE_CODE" = "200" ] || [ "$UPDATE_CODE" = "202" ]; then
+              echo "✅ 仓库可见性已成功设置为: $VISIBILITY"
+            else
+              echo "❌ 设置可见性失败 (HTTP $UPDATE_CODE)"
+              echo ""
+              echo "错误详情: $UPDATE_BODY"
+              echo ""
+              echo "可能的原因:"
+              echo "1. Token 权限不足 - 需要 Read, Write, Delete 权限"
+              echo "2. Token 已过期"
+              echo "3. 仓库属于其他用户或组织"
+              echo ""
+              echo "请在 Docker Hub 检查:"
+              echo "1. Token 权限设置: https://hub.docker.com/settings/security"
+              echo "2. 确保选择 'Read & Write & Delete' 或更高权限"
+              echo "3. 仓库页面手动设置: https://hub.docker.com/r/${REPO_PATH}/general"
+            fi
+          fi
+
           echo "=========================================="
+          echo ""
           echo "镜像已上传到 Docker Hub:"
           echo "  $HUB_IMAGE"
-          echo "  可见性: $VISIBILITY"
+          echo "  仓库地址: https://hub.docker.com/r/${REPO_PATH}"
           echo ""
           echo "拉取命令:"
           echo "  docker pull $HUB_IMAGE"
