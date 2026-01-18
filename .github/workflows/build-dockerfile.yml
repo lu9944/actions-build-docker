@@ -116,21 +116,55 @@ jobs:
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME || 'dockerhub_token_user' }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
         continue-on-error: ${{ github.event.inputs.enable_dockerhub_push != 'true' }}
         env:
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Display Authentication Status
+      - name: Verify Docker Hub Authentication
+        if: ${{ github.event.inputs.enable_dockerhub_push == 'true' }}
         run: |
-          if [ -n "$DOCKERHUB_TOKEN" ]; then
-            echo "✅ 已使用 Docker Hub Token 认证（Pro 模式）"
-          else
-            echo "⚠️  未配置 Docker Hub Token，使用匿名模式（有限制）"
+          echo "=========================================="
+          echo "Docker Hub 认证状态检查"
+          echo "=========================================="
+
+          # 检查是否配置了必要的 Secrets
+          if [ -z "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
+            echo "❌ 错误: DOCKERHUB_TOKEN 未配置"
+            echo ""
+            echo "请在 GitHub Secrets 中配置:"
+            echo "  - DOCKERHUB_TOKEN: Docker Hub 访问令牌"
+            echo "  - DOCKERHUB_USERNAME: Docker Hub 用户名"
+            exit 1
           fi
-        env:
-          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
+          if [ -z "${{ secrets.DOCKERHUB_USERNAME }}" ]; then
+            echo "❌ 错误: DOCKERHUB_USERNAME 未配置"
+            echo ""
+            echo "请在 GitHub Secrets 中配置 DOCKERHUB_USERNAME"
+            exit 1
+          fi
+
+          echo "✅ DOCKERHUB_TOKEN 已配置"
+          echo "✅ DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}"
+
+          # 验证登录状态
+          echo ""
+          echo "验证 Docker Hub 登录状态..."
+          if docker info 2>/dev/null | grep -q "Username"; then
+            echo "✅ Docker Hub 登录成功"
+            docker info | grep "Username"
+          else
+            echo "❌ Docker Hub 登录失败"
+            echo ""
+            echo "请检查:"
+            echo "1. DOCKERHUB_TOKEN 是否正确且未过期"
+            echo "2. DOCKERHUB_USERNAME 是否正确"
+            echo "3. Token 是否具有读写权限"
+            exit 1
+          fi
+          echo "=========================================="
 
       - name: Check Disk Space Before Build
         run: |
@@ -297,6 +331,7 @@ jobs:
           LOCAL_IMAGE="${{ github.event.inputs.image_name }}"
           HUB_IMAGE="${{ github.event.inputs.dockerhub_image_name }}"
           VISIBILITY="${{ github.event.inputs.dockerhub_visibility }}"
+          DH_USERNAME="${{ secrets.DOCKERHUB_USERNAME }}"
 
           if [ -z "$HUB_IMAGE" ]; then
             HUB_IMAGE="$LOCAL_IMAGE"
@@ -309,6 +344,36 @@ jobs:
           echo "目标镜像: $HUB_IMAGE"
           echo "仓库可见性: $VISIBILITY"
           echo ""
+
+          # 验证镜像名称格式
+          if [[ ! "$HUB_IMAGE" =~ .+/.+ ]]; then
+            echo "❌ 错误: 镜像名称格式不正确"
+            echo ""
+            echo "当前镜像名: $HUB_IMAGE"
+            echo "正确格式应为: username/imagename:tag"
+            echo ""
+            echo "例如:"
+            echo "  - $DH_USERNAME/myapp:latest"
+            echo "  - $DH_USERNAME/myapp:v1.0.0"
+            echo ""
+            echo "解决方案:"
+            echo "1. 在 dockerhub_image_name 参数中指定完整的镜像名"
+            echo "2. 或者修改 image_name 参数，添加用户名前缀"
+            exit 1
+          fi
+
+          # 检查镜像用户名是否与登录用户名匹配
+          IMAGE_USERNAME=$(echo "$HUB_IMAGE" | cut -d'/' -f1)
+          if [ "$IMAGE_USERNAME" != "$DH_USERNAME" ]; then
+            echo "⚠️  警告: 镜像所属用户 ($IMAGE_USERNAME) 与登录用户 ($DH_USERNAME) 不一致"
+            echo ""
+            echo "这可能导致推送失败，因为您可能没有推送到其他用户仓库的权限"
+            echo ""
+            echo "请确保:"
+            echo "1. 您有推送到 $IMAGE_USERNAME 仓库的权限"
+            echo "2. 或者使用 $DH_USERNAME/your-app:tag 格式的镜像名"
+            echo ""
+          fi
 
           # 如果镜像名不同，需要打标签
           if [ "$LOCAL_IMAGE" != "$HUB_IMAGE" ]; then
