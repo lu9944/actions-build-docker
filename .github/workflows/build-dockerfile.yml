@@ -45,6 +45,14 @@ on:
         description: 'Docker Hub 上的镜像名称（例如：username/myapp:latest）。留空则使用构建时的镜像名'
         required: false
         default: ''
+      dockerhub_visibility:
+        description: 'Docker Hub 仓库可见性'
+        required: false
+        default: 'public'
+        type: choice
+        options:
+          - 'public'
+          - 'private'
 
 jobs:
   build-and-save:
@@ -288,6 +296,7 @@ jobs:
           # 确定目标镜像名称
           LOCAL_IMAGE="${{ github.event.inputs.image_name }}"
           HUB_IMAGE="${{ github.event.inputs.dockerhub_image_name }}"
+          VISIBILITY="${{ github.event.inputs.dockerhub_visibility }}"
 
           if [ -z "$HUB_IMAGE" ]; then
             HUB_IMAGE="$LOCAL_IMAGE"
@@ -298,6 +307,7 @@ jobs:
 
           echo "本地镜像: $LOCAL_IMAGE"
           echo "目标镜像: $HUB_IMAGE"
+          echo "仓库可见性: $VISIBILITY"
           echo ""
 
           # 如果镜像名不同，需要打标签
@@ -328,8 +338,46 @@ jobs:
           echo "=========================================="
           echo "✅ 推送成功！"
           echo "=========================================="
+
+          # 设置仓库可见性
+          echo ""
+          echo "设置仓库可见性为: $VISIBILITY"
+
+          # 解析镜像名称（去除 tag，获取 namespace/repo）
+          # 例如: username/myapp:latest -> username/myapp
+          REPO_PATH=$(echo "$HUB_IMAGE" | cut -d':' -f1)
+
+          # 检查镜像名称格式（简单验证：包含斜杠且不为空）
+          if [[ ! "$REPO_PATH" =~ .+/.+ ]]; then
+            echo "⚠️  警告: 镜像名称格式可能不正确，跳过设置可见性"
+            echo "   正确格式应为: username/reponame"
+          else
+            # 调用 Docker Hub API 设置可见性
+            API_RESPONSE=$(curl -s -X PATCH \
+              "https://hub.docker.com/v2/repositories/${REPO_PATH}/" \
+              -H "Authorization: Bearer ${{ secrets.DOCKERHUB_TOKEN }}" \
+              -H "Content-Type: application/json" \
+              -d "{\"visibility\": \"${VISIBILITY}\"}" \
+              -w "\n%{http_code}")
+
+            # 分离响应体和状态码
+            HTTP_CODE=$(echo "$API_RESPONSE" | tail -n1)
+            RESPONSE_BODY=$(echo "$API_RESPONSE" | head -n-1)
+
+            if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "202" ]; then
+              echo "✅ 仓库可见性已设置为: $VISIBILITY"
+            else
+              echo "⚠️  设置可见性失败 (HTTP $HTTP_CODE)"
+              echo "响应: $RESPONSE_BODY"
+              echo "提示: 仓库可能已设置为此可见性，或 Token 权限不足"
+            fi
+          fi
+
+          echo ""
+          echo "=========================================="
           echo "镜像已上传到 Docker Hub:"
           echo "  $HUB_IMAGE"
+          echo "  可见性: $VISIBILITY"
           echo ""
           echo "拉取命令:"
           echo "  docker pull $HUB_IMAGE"
@@ -444,8 +492,10 @@ jobs:
             if [ -z "$HUB_IMAGE" ]; then
               HUB_IMAGE="${{ github.event.inputs.image_name }}"
             fi
+            VISIBILITY="${{ github.event.inputs.dockerhub_visibility }}"
             echo "✅ 已推送到 Docker Hub"
             echo "镜像地址: $HUB_IMAGE"
+            echo "可见性: $VISIBILITY"
             echo "拉取命令: docker pull $HUB_IMAGE"
           else
             echo "⏭️  已跳过 Docker Hub 推送"
