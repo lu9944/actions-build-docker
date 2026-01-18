@@ -36,6 +36,15 @@ on:
         description: 'FTP 目标路径（例如：/docker-images/）'
         required: false
         default: '/'
+      enable_dockerhub_push:
+        description: '是否推送到 Docker Hub'
+        required: false
+        default: false
+        type: boolean
+      dockerhub_image_name:
+        description: 'Docker Hub 上的镜像名称（例如：username/myapp:latest）。留空则使用构建时的镜像名'
+        required: false
+        default: ''
 
 jobs:
   build-and-save:
@@ -101,7 +110,7 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME || 'dockerhub_token_user' }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-        continue-on-error: true
+        continue-on-error: ${{ github.event.inputs.enable_dockerhub_push != 'true' }}
         env:
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
@@ -269,6 +278,63 @@ jobs:
           # 使用管道方式保存，避免在 /var/lib/docker/tmp 创建临时文件
           docker save ${{ github.event.inputs.image_name }} > ${IMAGE_FILE}
 
+      - name: Push to Docker Hub
+        if: ${{ github.event.inputs.enable_dockerhub_push == 'true' }}
+        run: |
+          echo "=========================================="
+          echo "开始推送到 Docker Hub"
+          echo "=========================================="
+
+          # 确定目标镜像名称
+          LOCAL_IMAGE="${{ github.event.inputs.image_name }}"
+          HUB_IMAGE="${{ github.event.inputs.dockerhub_image_name }}"
+
+          if [ -z "$HUB_IMAGE" ]; then
+            HUB_IMAGE="$LOCAL_IMAGE"
+            echo "未指定 Docker Hub 镜像名，使用构建镜像名: $HUB_IMAGE"
+          else
+            echo "Docker Hub 镜像名: $HUB_IMAGE"
+          fi
+
+          echo "本地镜像: $LOCAL_IMAGE"
+          echo "目标镜像: $HUB_IMAGE"
+          echo ""
+
+          # 如果镜像名不同，需要打标签
+          if [ "$LOCAL_IMAGE" != "$HUB_IMAGE" ]; then
+            echo "为镜像打标签..."
+            docker tag "$LOCAL_IMAGE" "$HUB_IMAGE"
+          fi
+
+          echo "开始推送镜像到 Docker Hub..."
+          echo "=========================================="
+
+          # 推送镜像
+          docker push "$HUB_IMAGE" || {
+            echo "=========================================="
+            echo "❌ 推送失败！"
+            echo ""
+            echo "可能的原因："
+            echo "1. Docker Hub Token 未配置或无效"
+            echo "2. 镜像名称格式不正确（应为 username/imagename:tag）"
+            echo "3. 没有推送到目标仓库的权限"
+            echo ""
+            echo "请检查 GitHub Secrets 中的 DOCKERHUB_TOKEN 和 DOCKERHUB_USERNAME"
+            echo "=========================================="
+            exit 1
+          }
+
+          echo ""
+          echo "=========================================="
+          echo "✅ 推送成功！"
+          echo "=========================================="
+          echo "镜像已上传到 Docker Hub:"
+          echo "  $HUB_IMAGE"
+          echo ""
+          echo "拉取命令:"
+          echo "  docker pull $HUB_IMAGE"
+          echo "=========================================="
+
       - name: Display TAR File Size
         run: |
           echo "TAR 文件信息:"
@@ -370,6 +436,19 @@ jobs:
             echo "✅ 已上传到 FTP 服务器"
           else
             echo "⏭️  已跳过 FTP 上传"
+          fi
+
+          # 根据 Docker Hub 开关状态显示不同信息
+          if [[ "${{ github.event.inputs.enable_dockerhub_push }}" == "true" ]]; then
+            HUB_IMAGE="${{ github.event.inputs.dockerhub_image_name }}"
+            if [ -z "$HUB_IMAGE" ]; then
+              HUB_IMAGE="${{ github.event.inputs.image_name }}"
+            fi
+            echo "✅ 已推送到 Docker Hub"
+            echo "镜像地址: $HUB_IMAGE"
+            echo "拉取命令: docker pull $HUB_IMAGE"
+          else
+            echo "⏭️  已跳过 Docker Hub 推送"
           fi
 
           echo "=========================================="
