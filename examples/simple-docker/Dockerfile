@@ -1,8 +1,8 @@
-FROM pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel
+FROM ubuntu:22.04
 
 # ========== 构建参数 ==========
 # conda 环境名称（可根据需要修改）
-ARG CONDA_ENV_NAME=ddddocr_env_v20260120
+ARG CONDA_ENV_NAME=requests_env
 # Python 版本（可根据需要修改）
 ARG PYTHON_VERSION=3.11
 
@@ -88,49 +88,24 @@ RUN set -eux \
         && /opt/conda/bin/conda --version; \
     fi
 
-# 设置 conda bin 路径为环境变量，确保后续命令可以使用
-ENV CONDA_BIN="/opt/conda/bin"
 
 # 创建conda环境并安装依赖（完全使用官方源，不换源）
-RUN export PATH=$CONDA_BIN:$PATH \
-    # 创建名为${CONDA_ENV_NAME}的conda环境（指定python版本，兼容依赖）
+RUN CONDA_BIN="/opt/conda/bin" \
+    && export PATH=$CONDA_BIN:$PATH \
+    # 创建名为pytorch_env的conda环境（指定python版本，兼容依赖）
     && conda create -y -n ${CONDA_ENV_NAME} python=${PYTHON_VERSION} \
     # 使用conda run在指定环境中安装依赖包（避免source命令问题）
     && conda install -y -n ${CONDA_ENV_NAME} \
-        fire \
-        loguru \
-        pyyaml \
-        tqdm \
-        "numpy<2" \
-        pillow==9.5.0 \
-        onnx \
-        onnxruntime \
-        onnxscript \
+        requests \
     # 清理conda缓存减小镜像体积
     && conda clean -y --all \
     # 修复环境权限，允许所有用户写入（支持非root用户运行容器）
     && chmod -R a+w /opt/conda/envs/${CONDA_ENV_NAME}/lib/python*/site-packages/ \
     # 将环境激活命令写入bashrc，容器启动后默认激活该环境
-    && echo "source /opt/conda/bin/activate ${CONDA_ENV_NAME}" >> /etc/bash.bashrc \
-    # 添加 PYTHONPATH 以支持 pip install --user 安装的包
-    && echo "export PYTHONPATH=\$(python -c \"import site; print(site.getusersitepackages())\"):\$PYTHONPATH" >> /etc/bash.bashrc \
-    # 获取 user site-packages 路径并创建启动脚本
-    && PYTHON_USER_SITE=$(${CONDA_BIN}/conda run -n ${CONDA_ENV_NAME} python -c "import site; print(site.getusersitepackages())") \
-    && echo "PYTHON_USER_SITE=$PYTHON_USER_SITE" \
-    && printf '#!/bin/bash\n\
-# 激活conda环境\n\
-source /opt/conda/bin/activate %s\n\
-# 设置PYTHONPATH以支持pip install --user安装的包\n\
-export PYTHONPATH=%s:$PYTHONPATH\n\
-# 执行传入的命令\n\
-exec "$@"\n' "${CONDA_ENV_NAME}" "$PYTHON_USER_SITE" > /entrypoint.sh \
-    && chmod +x /entrypoint.sh \
-    && echo "export PYTHONPATH=$PYTHON_USER_SITE:\$PYTHONPATH" >> /etc/bash.bashrc
+    && echo "source /opt/conda/bin/activate ${CONDA_ENV_NAME}" >> /etc/bash.bashrc
 
 # 将conda加入全局PATH，确保环境激活命令可用
 ENV PATH="/opt/conda/bin:${PATH}"
 
 # 设置默认激活环境的环境变量（增强兼容性）
 ENV CONDA_DEFAULT_ENV="${CONDA_ENV_NAME}"
-
-ENTRYPOINT ["/entrypoint.sh"]
