@@ -110,7 +110,7 @@ RUN set -x && \
 # ========== 步骤5: 清理 conda 缓存 ==========
 RUN set -x && \
     /opt/conda/bin/conda clean -y --all && \
-    && chmod -R a+w /opt/conda/envs/${CONDA_ENV_NAME}/lib/python*/site-packages/ \
+    chmod -R a+w /opt/conda/envs/${CONDA_ENV_NAME}/lib/python*/site-packages/ \
     && echo "===== conda 缓存清理完成 ====="
 
 # ========== 步骤6: 修复权限并配置环境 ==========
