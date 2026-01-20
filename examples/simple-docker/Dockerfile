@@ -92,10 +92,8 @@ ARG CONDA_ENV_NAME=ddddocr_trainer_2026
 ARG PYTHON_VERSION=3.11
 
 # ========== 步骤0: 接受 Anaconda ToS（conda 25.x 要求） ==========
-RUN set -x && \
-    /opt/conda/bin/conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main && \
-    /opt/conda/bin/conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r && \
-    echo "===== ToS 接受完成 ====="
+# conda 25.x 使用环境变量接受 ToS，无需运行 conda tos accept 命令
+ENV CONDA_YES_ACCEPT_TERMS_OF_SERVICE=true
 
 # ========== 步骤1: 验证 conda 安装 ==========
 RUN set -x && \
