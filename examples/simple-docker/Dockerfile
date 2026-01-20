@@ -110,9 +110,9 @@ RUN set -x && \
     (echo "===== 失败，尝试列出可用 Python 版本 =====" && \
      /opt/conda/bin/conda search "python=[${PYTHON_VERSION}]*" && exit 1)
 
-# ========== 步骤3: 预安装依赖包(根据自己的需求) ==========
+# ========== 步骤3: 使用 pip 安装所有依赖包（更简单统一）==========
 RUN set -x && \
-    /opt/conda/bin/conda install -y -n ${CONDA_ENV_NAME} \
+    /opt/conda/envs/${CONDA_ENV_NAME}/bin/pip install \
         fire \
         loguru \
         pyyaml \
@@ -123,19 +123,19 @@ RUN set -x && \
         onnxruntime \
         onnxscript \
         pillow==9.5.0 && \
-    echo "===== 多个包安装成功 ====="
+    echo "===== 依赖包安装成功 ====="
 
-# ========== 步骤3.5: 安装 PyTorch (CUDA 12.4) ==========
+# ========== 步骤4: 安装 PyTorch (CUDA 12.4) ==========
 RUN set -x && \
     /opt/conda/envs/${CONDA_ENV_NAME}/bin/pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124 && \
     echo "===== PyTorch 安装完成 ====="
 
-# ========== 步骤4: 清理 conda 缓存 ==========
+# ========== 步骤5: 清理 conda 缓存 ==========
 RUN set -x && \
     /opt/conda/bin/conda clean -y --all && \
     echo "===== conda 缓存清理完成 ====="
 
-# ========== 步骤5: 修复权限并配置环境 ==========
+# ========== 步骤6: 修复权限并配置环境 ==========
 RUN set -x && \
     chown -R apulis-dev:apulis-dev /opt/conda/envs/${CONDA_ENV_NAME} && \
     echo "source /opt/conda/bin/activate ${CONDA_ENV_NAME}" >> /etc/bash.bashrc && \
