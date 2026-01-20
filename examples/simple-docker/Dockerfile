@@ -1,6 +1,9 @@
 FROM ubuntu:22.04
 
 # ========== 构建参数 ==========
+# 缓存破坏标记（用于强制重新构建）
+ARG CACHEBUST=20250120
+
 # conda 环境名称（可根据需要修改）
 ARG CONDA_ENV_NAME=requests_env
 # Python 版本（可根据需要修改）
