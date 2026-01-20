@@ -102,6 +102,11 @@ RUN set -x && \
     echo "CONDA_ENV_NAME=${CONDA_ENV_NAME}" && \
     echo "PYTHON_VERSION=${PYTHON_VERSION}"
 
+# ========== 步骤1.5: 创建非root用户 ==========
+RUN set -x && \
+    useradd -m -s /bin/bash apulis-dev && \
+    echo "apulis-dev ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
 # ========== 步骤2: 创建 conda 环境 ==========
 RUN set -x && \
     /opt/conda/bin/conda create -y -n ${CONDA_ENV_NAME} python=${PYTHON_VERSION} && \
@@ -131,8 +136,9 @@ RUN set -x && \
 
 # ========== 步骤5: 修复权限并配置环境 ==========
 RUN set -x && \
-    chmod -R a+w /opt/conda/envs/${CONDA_ENV_NAME}/lib/python*/site-packages/ && \
+    chown -R apulis-dev:apulis-dev /opt/conda/envs/${CONDA_ENV_NAME} && \
     echo "source /opt/conda/bin/activate ${CONDA_ENV_NAME}" >> /etc/bash.bashrc && \
+    echo "source /opt/conda/bin/activate ${CONDA_ENV_NAME}" >> /home/apulis-dev/.bashrc && \
     echo "===== conda 环境配置完成 ====="
 
 # 将conda加入全局PATH，确保环境激活命令可用
@@ -140,3 +146,7 @@ ENV PATH="/opt/conda/bin:${PATH}"
 
 # 设置默认激活环境的环境变量（增强兼容性）
 ENV CONDA_DEFAULT_ENV="${CONDA_ENV_NAME}"
+
+# 切换到非root用户
+USER apulis-dev
+WORKDIR /home/apulis-dev
