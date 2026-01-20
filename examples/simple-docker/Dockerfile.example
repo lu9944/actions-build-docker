@@ -1,6 +1,11 @@
-FROM pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel
+FROM ubuntu:22.04
+
+# ========== 构建参数 ==========
+# 缓存破坏标记（用于强制重新构建）
+ARG CACHEBUST=20250120
+
 # conda 环境名称（可根据需要修改）
-ARG CONDA_ENV_NAME=ddddocr_trainer_2026
+ARG CONDA_ENV_NAME=requests_env
 # Python 版本（可根据需要修改）
 ARG PYTHON_VERSION=3.11
 
@@ -88,7 +93,7 @@ RUN set -eux \
 
 
 # 重新声明构建参数（确保在RUN命令中可用）
-ARG CONDA_ENV_NAME=ddddocr_trainer_2026
+ARG CONDA_ENV_NAME=requests_env
 ARG PYTHON_VERSION=3.11
 
 # ========== 步骤0: 接受 Anaconda ToS（conda 25.x 要求） ==========
@@ -111,20 +116,10 @@ RUN set -x && \
     (echo "===== 失败，尝试列出可用 Python 版本 =====" && \
      /opt/conda/bin/conda search "python=[${PYTHON_VERSION}]*" && exit 1)
 
-# ========== 步骤3: 预安装依赖包(根据自己的需求) ==========
+# ========== 步骤3: 安装 requests 包 ==========
 RUN set -x && \
-    /opt/conda/bin/conda install -y -n ${CONDA_ENV_NAME} \
-        fire \
-        loguru \
-        pyyaml \
-        tqdm \
-        numpy<2 \
-        seaborn \
-        onnx \
-        onnxruntime \
-        onnxscript \
-        pillow==9.5.0 && \
-    echo "===== 多个包安装成功 ====="
+    /opt/conda/bin/conda install -y -n ${CONDA_ENV_NAME} requests && \
+    echo "===== requests 包安装成功 ====="
 
 # ========== 步骤4: 清理 conda 缓存 ==========
 RUN set -x && \
