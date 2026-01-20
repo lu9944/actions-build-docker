@@ -93,6 +93,12 @@ RUN set -eux \
 ARG CONDA_ENV_NAME=requests_env
 ARG PYTHON_VERSION=3.11
 
+# ========== 步骤0: 接受 Anaconda ToS（conda 25.x 要求） ==========
+RUN set -x && \
+    /opt/conda/bin/conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main && \
+    /opt/conda/bin/conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r && \
+    echo "===== ToS 接受完成 ====="
+
 # ========== 步骤1: 验证 conda 安装 ==========
 RUN set -x && \
     ls -la /opt/conda/bin/conda && \
