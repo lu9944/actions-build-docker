@@ -128,18 +128,19 @@ RUN set -x && \
 
 # ========== 步骤8: 创建 entrypoint 脚本自动激活 conda 环境 ==========
 RUN set -x && \
-    echo '#!/bin/bash' > /usr/local/bin/entrypoint.sh && \
-    echo '' >> /usr/local/bin/entrypoint.sh && \
-    echo '# 自动激活 conda 环境' >> /usr/local/bin/entrypoint.sh && \
-    echo "source /opt/conda/bin/activate ${CONDA_ENV_NAME}" >> /usr/local/bin/entrypoint.sh && \
-    echo '' >> /usr/local/bin/entrypoint.sh && \
-    echo '# 执行传入的命令（如果没有命令则启动 bash）' >> /usr/local/bin/entrypoint.sh && \
-    echo 'if [ $# -eq 0 ]; then' >> /usr/local/bin/entrypoint.sh && \
-    echo '    exec bash -l' >> /usr/local/bin/entrypoint.sh && \
-    echo 'else' >> /usr/local/bin/entrypoint.sh && \
-    echo '    exec "$@"' >> /usr/local/bin/entrypoint.sh && \
-    echo 'fi' >> /usr/local/bin/entrypoint.sh && \
-    chmod +x /usr/local/bin/entrypoint.sh && \
+    # 获取 user site-packages 路径
+    PYTHON_USER_SITE=$(/opt/conda/bin/conda run -n ${CONDA_ENV_NAME} python -c "import site; print(site.getusersitepackages())") && \
+    echo "PYTHON_USER_SITE=$PYTHON_USER_SITE" && \
+    # 创建 entrypoint 脚本
+    printf '#!/bin/bash\n\
+# 激活conda环境\n\
+source /opt/conda/bin/activate %s\n\
+# 设置PYTHONPATH以支持pip install --user安装的包\n\
+export PYTHONPATH=%s:$PYTHONPATH\n\
+# 执行传入的命令\n\
+exec "$@"\n' "${CONDA_ENV_NAME}" "$PYTHON_USER_SITE" > /entrypoint.sh && \
+    chmod +x /entrypoint.sh && \
+    echo "export PYTHONPATH=$PYTHON_USER_SITE:\$PYTHONPATH" >> /etc/bash.bashrc && \
     echo "===== entrypoint 脚本创建完成 ====="
 
 # 将conda加入全局PATH，确保环境激活命令可用
@@ -149,4 +150,4 @@ ENV PATH="/opt/conda/bin:${PATH}"
 ENV CONDA_DEFAULT_ENV="${CONDA_ENV_NAME}"
 
 # 设置 entrypoint 自动激活 conda 环境
-ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+ENTRYPOINT ["/entrypoint.sh"]
