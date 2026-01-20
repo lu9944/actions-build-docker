@@ -64,27 +64,23 @@ RUN set -eux \
 
 WORKDIR /usr/local/src
 
-# 检查并安装Miniconda（如果基础镜像已包含则跳过）
+# 强制安装 Miniconda 24.4.0（删除基础镜像中的旧 conda 以避免 ToS 问题）
 RUN set -eux \
-    # 检查conda是否已安装
-    && if [ -d "/opt/conda" ]; then \
-        echo "发现基础镜像已包含conda，跳过安装"; \
-        /opt/conda/bin/conda --version; \
-    else \
-        echo "开始安装Miniconda"; \
-        # 验证curl可用
-        command -v curl || (echo "ERROR: curl not found" && exit 1) \
-        # 下载Miniconda安装包
-        && curl -fL -o Miniconda3.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh \
-        # 验证文件下载成功
-        && ls -lh Miniconda3.sh \
-        # 安装Miniconda
-        && /bin/bash Miniconda3.sh -b -p /opt/conda \
-        # 清理安装包
-        && rm Miniconda3.sh \
-        # 验证conda安装成功
-        && /opt/conda/bin/conda --version; \
-    fi
+    # 删除基础镜像中可能存在的 conda（避免使用 25.x 版本）
+    && rm -rf /opt/conda \
+    && echo "开始安装 Miniconda 24.4.0"; \
+    # 验证curl可用
+    command -v curl || (echo "ERROR: curl not found" && exit 1) \
+    # 下载Miniconda安装包（使用 24.4.0 版本，避免 ToS 问题）
+    && curl -fL -o Miniconda3.sh https://repo.anaconda.com/miniconda/Miniconda3-py310_24.4.0-0-Linux-x86_64.sh \
+    # 验证文件下载成功
+    && ls -lh Miniconda3.sh \
+    # 安装Miniconda
+    && /bin/bash Miniconda3.sh -b -p /opt/conda \
+    # 清理安装包
+    && rm Miniconda3.sh \
+    # 验证conda安装成功
+    && /opt/conda/bin/conda --version
 
 
 # 重新声明构建参数（确保在RUN命令中可用）
