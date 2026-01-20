@@ -1,6 +1,6 @@
-FROM ubuntu:22.04
+FROM nvidia/cuda:12.4.0-devel-ubuntu22.04
 # conda 环境名称（可根据需要修改）
-ARG CONDA_ENV_NAME=ubuntu_env
+ARG CONDA_ENV_NAME=ddddocr_trainer_2026
 # Python 版本（可根据需要修改）
 ARG PYTHON_VERSION=3.11
 
@@ -84,8 +84,12 @@ RUN set -eux \
 
 
 # 重新声明构建参数（确保在RUN命令中可用）
-ARG CONDA_ENV_NAME=ubuntu_env
+ARG CONDA_ENV_NAME=ddddocr_trainer_2026
 ARG PYTHON_VERSION=3.11
+
+# ========== 步骤0: 接受 Anaconda ToS（conda 25.x 要求） ==========
+# conda 25.x 使用环境变量接受 ToS，无需运行 conda tos accept 命令
+ENV CONDA_YES_ACCEPT_TERMS_OF_SERVICE=true
 
 # ========== 步骤1: 验证 conda 安装 ==========
 RUN set -x && \
@@ -93,6 +97,11 @@ RUN set -x && \
     /opt/conda/bin/conda --version && \
     echo "CONDA_ENV_NAME=${CONDA_ENV_NAME}" && \
     echo "PYTHON_VERSION=${PYTHON_VERSION}"
+
+# ========== 步骤1.5: 创建非root用户 ==========
+RUN set -x && \
+    useradd -m -s /bin/bash apulis-dev && \
+    echo "apulis-dev ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
 # ========== 步骤2: 创建 conda 环境 ==========
 RUN set -x && \
@@ -104,14 +113,27 @@ RUN set -x && \
 # ========== 步骤3: 使用 pip 安装所有依赖包（更简单统一）==========
 RUN set -x && \
     /opt/conda/envs/${CONDA_ENV_NAME}/bin/pip install \
+        fire \
+        loguru \
+        pyyaml \
+        tqdm \
+        "numpy<2" \
+        seaborn \
+        onnx \
+        onnxruntime \
+        onnxscript \
         pillow==9.5.0 && \
     echo "===== 依赖包安装成功 ====="
+
+# ========== 步骤4: 安装 PyTorch (CUDA 12.4) ==========
+RUN set -x && \
+    /opt/conda/envs/${CONDA_ENV_NAME}/bin/pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124 && \
+    echo "===== PyTorch 安装完成 ====="
 
 # ========== 步骤5: 清理 conda 缓存 ==========
 RUN set -x && \
     /opt/conda/bin/conda clean -y --all && \
-    && chmod -R a+w /opt/conda/envs/${CONDA_ENV_NAME}/lib/python*/site-packages/ \
-    && echo "===== conda 缓存清理完成 ====="
+    echo "===== conda 缓存清理完成 ====="
 
 # ========== 步骤6: 修复权限并配置环境 ==========
 RUN set -x && \
@@ -125,3 +147,7 @@ ENV PATH="/opt/conda/bin:${PATH}"
 
 # 设置默认激活环境的环境变量（增强兼容性）
 ENV CONDA_DEFAULT_ENV="${CONDA_ENV_NAME}"
+
+# 切换到非root用户
+USER apulis-dev
+WORKDIR /home/apulis-dev
