@@ -117,17 +117,40 @@ RUN set -x && \
 RUN set -x && \
     groupadd apulis-dev && \
     useradd -m -s /bin/bash -g apulis-dev apulis-dev && \
+    # 为 apulis-dev 用户添加 sudo 权限（可选）
+    echo "apulis-dev ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.d/apulis-dev && \
+    chmod 440 /etc/sudoers.d/apulis-dev && \
     echo "===== 用户创建完成 ====="
 
 # ========== 步骤7: 修复权限并配置环境 ==========
 RUN set -x && \
     chown -R apulis-dev:apulis-dev /opt/conda/envs/${CONDA_ENV_NAME} && \
+    # 清理可能导致错误的 conda 配置
+    rm -f /opt/conda/.condarc /root/.condarc /home/apulis-dev/.condarc && \
+    # 重新初始化 conda
+    /opt/conda/bin/conda init bash && \
+    # 设置正确的 conda 配置
+    /opt/conda/bin/conda config --set auto_activate_base false && \
+    /opt/conda/bin/conda config --set env_prompt '({name})' && \
+    # 在系统级 bashrc 中激活环境（所有用户）
     echo "source /opt/conda/bin/activate ${CONDA_ENV_NAME}" >> /etc/bash.bashrc && \
+    # 在用户的 .bashrc 中激活环境
     echo "source /opt/conda/bin/activate ${CONDA_ENV_NAME}" >> /home/apulis-dev/.bashrc && \
+    # 在用户的 .bash_profile 中也激活环境（登录 shell）
+    echo "source /opt/conda/bin/activate ${CONDA_ENV_NAME}" >> /home/apulis-dev/.bash_profile && \
+    # 同时也设置在用户的 .profile 中
+    echo "source /opt/conda/bin/activate ${CONDA_ENV_NAME}" >> /home/apulis-dev/.profile && \
     echo "===== conda 环境配置完成 ====="
 
-# ========== 步骤8: 创建 entrypoint 脚本自动激活 conda 环境 ==========
+# ========== 步骤8: 创建全局环境激活脚本 ==========
 RUN set -x && \
+    # 创建一个配置脚本，在所有 shell 会话中激活 conda 环境
+    printf '#!/bin/bash\n\
+# 自动激活 conda 环境\n\
+if [ -f /opt/conda/bin/activate ]; then\n\
+    source /opt/conda/bin/activate %s 2>/dev/null\n\
+fi\n' "${CONDA_ENV_NAME}" > /etc/profile.d/activate-conda-env.sh && \
+    chmod +x /etc/profile.d/activate-conda-env.sh && \
     # 获取 user site-packages 路径
     PYTHON_USER_SITE=$(/opt/conda/bin/conda run -n ${CONDA_ENV_NAME} python -c "import site; print(site.getusersitepackages())") && \
     echo "PYTHON_USER_SITE=$PYTHON_USER_SITE" && \
@@ -138,10 +161,15 @@ source /opt/conda/bin/activate %s\n\
 # 设置PYTHONPATH以支持pip install --user安装的包\n\
 export PYTHONPATH=%s:$PYTHONPATH\n\
 # 执行传入的命令\n\
-exec "$@"\n' "${CONDA_ENV_NAME}" "$PYTHON_USER_SITE" > /entrypoint.sh && \
+if [ $# -eq 0 ]; then\n\
+    exec bash -l\n\
+else\n\
+    exec "$@"\n\
+fi\n' "${CONDA_ENV_NAME}" "$PYTHON_USER_SITE" > /entrypoint.sh && \
     chmod +x /entrypoint.sh && \
     echo "export PYTHONPATH=$PYTHON_USER_SITE:\$PYTHONPATH" >> /etc/bash.bashrc && \
-    echo "===== entrypoint 脚本创建完成 ====="
+    echo "export PYTHONPATH=$PYTHON_USER_SITE:\$PYTHONPATH" >> /home/apulis-dev/.bashrc && \
+    echo "===== 环境配置脚本创建完成 ====="
 
 # 将conda加入全局PATH，确保环境激活命令可用
 ENV PATH="/opt/conda/bin:${PATH}"
