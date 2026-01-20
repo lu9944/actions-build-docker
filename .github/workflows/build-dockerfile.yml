@@ -37,7 +37,13 @@ on:
         required: false
         default: '/'
       enable_dockerhub_push:
-        description: '是否推送到 Docker Hub'
+        description: '是否推送到 Docker Hub（大镜像强烈推荐）'
+        required: false
+        default: true
+        type: boolean
+
+      skip_tar_export:
+        description: '跳过 TAR 导出（镜像超过 10GB 时建议跳过）'
         required: false
         default: true
         type: boolean
@@ -288,6 +294,7 @@ jobs:
           echo "=========================================="
 
       - name: Save Image as TAR
+        if: ${{ github.event.inputs.skip_tar_export != 'true' }}
         run: |
           # 验证镜像是否存在
           echo "检查镜像是否存在: ${{ github.event.inputs.image_name }}"
@@ -561,6 +568,7 @@ jobs:
           echo "=========================================="
 
       - name: Display TAR File Size
+        if: ${{ github.event.inputs.skip_tar_export != 'true' }}
         run: |
           echo "TAR 文件信息:"
           ls -lh ${{ env.IMAGE_FILE }}
@@ -644,8 +652,14 @@ jobs:
           echo "✅ 构建任务完成!"
           echo "=========================================="
           echo "镜像名称: ${{ github.event.inputs.image_name }}"
-          echo "镜像已保存为: ${{ env.IMAGE_FILE }}"
           echo "Dockerfile 路径: ${{ github.event.inputs.dockerfile_path }}"
+
+          # 根据 TAR 导出开关状态显示不同信息
+          if [[ "${{ github.event.inputs.skip_tar_export }}" == "true" ]]; then
+            echo "⏭️  已跳过 TAR 导出（镜像太大或手动跳过）"
+          else
+            echo "镜像已保存为: ${{ env.IMAGE_FILE }}"
+          fi
 
           # 根据 Release 开关状态显示不同信息
           if [[ "${{ github.event.inputs.enable_release }}" == "true" ]]; then
@@ -680,8 +694,20 @@ jobs:
 
           echo "=========================================="
           echo ""
-          echo "📦 离线使用方法:"
-          echo "1. 下载 TAR 文件"
-          echo "2. 运行: docker load -i ${{ env.IMAGE_FILE }}"
-          echo "3. 运行: docker run -it ${{ github.event.inputs.image_name }}"
+          echo "📦 使用方法:"
+          if [[ "${{ github.event.inputs.enable_dockerhub_push }}" == "true" ]]; then
+            HUB_IMAGE="${{ github.event.inputs.dockerhub_image_name }}"
+            if [ -z "$HUB_IMAGE" ]; then
+              HUB_IMAGE="${{ github.event.inputs.image_name }}"
+            fi
+            echo "1. docker pull $HUB_IMAGE"
+            echo "2. docker run -it $HUB_IMAGE"
+          elif [[ "${{ github.event.inputs.skip_tar_export }}" == "true" ]]; then
+            echo "⚠️  跳过了 Docker Hub 推送和 TAR 导出"
+            echo "请重新运行并启用至少一种导出方式"
+          else
+            echo "1. 下载 TAR 文件"
+            echo "2. 运行: docker load -i ${{ env.IMAGE_FILE }}"
+            echo "3. 运行: docker run -it ${{ github.event.inputs.image_name }}"
+          fi
           echo "=========================================="
