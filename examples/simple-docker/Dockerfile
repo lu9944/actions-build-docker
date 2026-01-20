@@ -116,7 +116,7 @@ RUN set -x && \
         loguru \
         pyyaml \
         tqdm \
-        numpy<2 \
+        "numpy<2" \
         seaborn \
         onnx \
         onnxruntime \
