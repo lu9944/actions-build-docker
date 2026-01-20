@@ -113,7 +113,13 @@ RUN set -x && \
     chmod -R a+w /opt/conda/envs/${CONDA_ENV_NAME}/lib/python*/site-packages/ \
     && echo "===== conda 缓存清理完成 ====="
 
-# ========== 步骤6: 修复权限并配置环境 ==========
+# ========== 步骤6: 创建 apulis-dev 用户 ==========
+RUN set -x && \
+    groupadd apulis-dev && \
+    useradd -m -s /bin/bash -g apulis-dev apulis-dev && \
+    echo "===== 用户创建完成 ====="
+
+# ========== 步骤7: 修复权限并配置环境 ==========
 RUN set -x && \
     chown -R apulis-dev:apulis-dev /opt/conda/envs/${CONDA_ENV_NAME} && \
     echo "source /opt/conda/bin/activate ${CONDA_ENV_NAME}" >> /etc/bash.bashrc && \
