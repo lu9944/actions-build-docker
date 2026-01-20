@@ -1,4 +1,4 @@
-FROM pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel
+FROM nvidia/cuda:12.4.0-devel-ubuntu22.04
 # conda 环境名称（可根据需要修改）
 ARG CONDA_ENV_NAME=ddddocr_trainer_2026
 # Python 版本（可根据需要修改）
