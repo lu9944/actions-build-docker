@@ -53,6 +53,11 @@ on:
         options:
           - 'public'
           - 'private'
+      no_cache:
+        description: '禁用构建缓存（强制重新构建所有层）'
+        required: false
+        default: true
+        type: boolean
 
 jobs:
   build-and-save:
@@ -206,7 +211,15 @@ jobs:
             echo "开始构建..."
             echo "=========================================="
 
+            # 添加 --no-cache 参数（如果启用）
+            CACHE_FLAG=""
+            if [[ "${{ github.event.inputs.no_cache }}" == "true" ]]; then
+              CACHE_FLAG="--no-cache"
+              echo "⚠️  构建缓存已禁用"
+            fi
+
             docker build \
+              $CACHE_FLAG \
               -f "$RELATIVE_DOCKERFILE" \
               -t "${{ github.event.inputs.image_name }}" \
               . || {
@@ -222,7 +235,15 @@ jobs:
             echo "开始构建..."
             echo "=========================================="
 
+            # 添加 --no-cache 参数（如果启用）
+            CACHE_FLAG=""
+            if [[ "${{ github.event.inputs.no_cache }}" == "true" ]]; then
+              CACHE_FLAG="--no-cache"
+              echo "⚠️  构建缓存已禁用"
+            fi
+
             docker build \
+              $CACHE_FLAG \
               -f "../$DOCKERFILE" \
               -t "${{ github.event.inputs.image_name }}" \
               . || {
