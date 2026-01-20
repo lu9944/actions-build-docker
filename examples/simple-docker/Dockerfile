@@ -129,6 +129,11 @@ RUN set -x && \
         pillow==9.5.0 && \
     echo "===== 多个包安装成功 ====="
 
+# ========== 步骤3.5: 安装 PyTorch (CUDA 12.4) ==========
+RUN set -x && \
+    /opt/conda/envs/${CONDA_ENV_NAME}/bin/pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124 && \
+    echo "===== PyTorch 安装完成 ====="
+
 # ========== 步骤4: 清理 conda 缓存 ==========
 RUN set -x && \
     /opt/conda/bin/conda clean -y --all && \
