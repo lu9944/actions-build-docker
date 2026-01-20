@@ -89,20 +89,34 @@ RUN set -eux \
     fi
 
 
+# 重新声明构建参数（确保在RUN命令中可用）
+ARG CONDA_ENV_NAME=requests_env
+ARG PYTHON_VERSION=3.11
+
 # 创建conda环境并安装依赖（完全使用官方源，不换源）
-RUN CONDA_BIN="/opt/conda/bin" \
+RUN set -eu \
+    && CONDA_BIN="/opt/conda/bin" \
     && export PATH=$CONDA_BIN:$PATH \
-    # 创建名为pytorch_env的conda环境（指定python版本，兼容依赖）
+    && echo "===== 开始调试 =====" \
+    && echo "检查 conda 是否存在:" \
+    && ls -la /opt/conda/bin/conda \
+    && echo "验证 conda 版本:" \
+    && conda --version \
+    && echo "使用参数: CONDA_ENV_NAME=${CONDA_ENV_NAME}, PYTHON_VERSION=${PYTHON_VERSION}" \
+    && echo "===== 开始创建 conda 环境 =====" \
     && conda create -y -n ${CONDA_ENV_NAME} python=${PYTHON_VERSION} \
-    # 使用conda run在指定环境中安装依赖包（避免source命令问题）
-    && conda install -y -n ${CONDA_ENV_NAME} \
-        requests \
+    && echo "===== conda 环境创建成功 =====" \
+    && echo "===== 开始安装 requests 包 =====" \
+    && conda install -y -n ${CONDA_ENV_NAME} requests \
+    && echo "===== requests 包安装成功 =====" \
     # 清理conda缓存减小镜像体积
     && conda clean -y --all \
+    && echo "===== conda 缓存清理完成 =====" \
     # 修复环境权限，允许所有用户写入（支持非root用户运行容器）
     && chmod -R a+w /opt/conda/envs/${CONDA_ENV_NAME}/lib/python*/site-packages/ \
     # 将环境激活命令写入bashrc，容器启动后默认激活该环境
-    && echo "source /opt/conda/bin/activate ${CONDA_ENV_NAME}" >> /etc/bash.bashrc
+    && echo "source /opt/conda/bin/activate ${CONDA_ENV_NAME}" >> /etc/bash.bashrc \
+    && echo "===== conda 环境配置完成 ====="
 
 # 将conda加入全局PATH，确保环境激活命令可用
 ENV PATH="/opt/conda/bin:${PATH}"
