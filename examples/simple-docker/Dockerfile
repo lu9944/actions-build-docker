@@ -104,13 +104,15 @@ RUN set -eu \
     && conda --version \
     && echo "使用参数: CONDA_ENV_NAME=${CONDA_ENV_NAME}, PYTHON_VERSION=${PYTHON_VERSION}" \
     && echo "===== 开始创建 conda 环境 =====" \
-    && conda create -y -n ${CONDA_ENV_NAME} python=${PYTHON_VERSION} \
+    && conda create -y -n ${CONDA_ENV_NAME} python=${PYTHON_VERSION} || \
+    (echo "===== conda create 失败，尝试列出可用 Python 版本 =====" && \
+     conda search "python=[${PYTHON_VERSION}]*" && exit 1) \
     && echo "===== conda 环境创建成功 =====" \
     && echo "===== 开始安装 requests 包 =====" \
-    && conda install -y -n ${CONDA_ENV_NAME} requests \
+    && /opt/conda/bin/conda install -y -n ${CONDA_ENV_NAME} requests \
     && echo "===== requests 包安装成功 =====" \
     # 清理conda缓存减小镜像体积
-    && conda clean -y --all \
+    && /opt/conda/bin/conda clean -y --all \
     && echo "===== conda 缓存清理完成 =====" \
     # 修复环境权限，允许所有用户写入（支持非root用户运行容器）
     && chmod -R a+w /opt/conda/envs/${CONDA_ENV_NAME}/lib/python*/site-packages/ \
