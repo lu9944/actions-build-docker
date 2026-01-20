@@ -93,32 +93,35 @@ RUN set -eux \
 ARG CONDA_ENV_NAME=requests_env
 ARG PYTHON_VERSION=3.11
 
-# 创建conda环境并安装依赖（完全使用官方源，不换源）
-RUN set -eu \
-    && CONDA_BIN="/opt/conda/bin" \
-    && export PATH=$CONDA_BIN:$PATH \
-    && echo "===== 开始调试 =====" \
-    && echo "检查 conda 是否存在:" \
-    && ls -la /opt/conda/bin/conda \
-    && echo "验证 conda 版本:" \
-    && conda --version \
-    && echo "使用参数: CONDA_ENV_NAME=${CONDA_ENV_NAME}, PYTHON_VERSION=${PYTHON_VERSION}" \
-    && echo "===== 开始创建 conda 环境 =====" \
-    && conda create -y -n ${CONDA_ENV_NAME} python=${PYTHON_VERSION} || \
-    (echo "===== conda create 失败，尝试列出可用 Python 版本 =====" && \
-     conda search "python=[${PYTHON_VERSION}]*" && exit 1) \
-    && echo "===== conda 环境创建成功 =====" \
-    && echo "===== 开始安装 requests 包 =====" \
-    && /opt/conda/bin/conda install -y -n ${CONDA_ENV_NAME} requests \
-    && echo "===== requests 包安装成功 =====" \
-    # 清理conda缓存减小镜像体积
-    && /opt/conda/bin/conda clean -y --all \
-    && echo "===== conda 缓存清理完成 =====" \
-    # 修复环境权限，允许所有用户写入（支持非root用户运行容器）
-    && chmod -R a+w /opt/conda/envs/${CONDA_ENV_NAME}/lib/python*/site-packages/ \
-    # 将环境激活命令写入bashrc，容器启动后默认激活该环境
-    && echo "source /opt/conda/bin/activate ${CONDA_ENV_NAME}" >> /etc/bash.bashrc \
-    && echo "===== conda 环境配置完成 ====="
+# ========== 步骤1: 验证 conda 安装 ==========
+RUN set -x && \
+    ls -la /opt/conda/bin/conda && \
+    /opt/conda/bin/conda --version && \
+    echo "CONDA_ENV_NAME=${CONDA_ENV_NAME}" && \
+    echo "PYTHON_VERSION=${PYTHON_VERSION}"
+
+# ========== 步骤2: 创建 conda 环境 ==========
+RUN set -x && \
+    /opt/conda/bin/conda create -y -n ${CONDA_ENV_NAME} python=${PYTHON_VERSION} && \
+    echo "===== conda 环境创建成功 =====" || \
+    (echo "===== 失败，尝试列出可用 Python 版本 =====" && \
+     /opt/conda/bin/conda search "python=[${PYTHON_VERSION}]*" && exit 1)
+
+# ========== 步骤3: 安装 requests 包 ==========
+RUN set -x && \
+    /opt/conda/bin/conda install -y -n ${CONDA_ENV_NAME} requests && \
+    echo "===== requests 包安装成功 ====="
+
+# ========== 步骤4: 清理 conda 缓存 ==========
+RUN set -x && \
+    /opt/conda/bin/conda clean -y --all && \
+    echo "===== conda 缓存清理完成 ====="
+
+# ========== 步骤5: 修复权限并配置环境 ==========
+RUN set -x && \
+    chmod -R a+w /opt/conda/envs/${CONDA_ENV_NAME}/lib/python*/site-packages/ && \
+    echo "source /opt/conda/bin/activate ${CONDA_ENV_NAME}" >> /etc/bash.bashrc && \
+    echo "===== conda 环境配置完成 ====="
 
 # 将conda加入全局PATH，确保环境激活命令可用
 ENV PATH="/opt/conda/bin:${PATH}"
