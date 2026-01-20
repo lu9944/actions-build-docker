@@ -126,8 +126,27 @@ RUN set -x && \
     echo "source /opt/conda/bin/activate ${CONDA_ENV_NAME}" >> /home/apulis-dev/.bashrc && \
     echo "===== conda 环境配置完成 ====="
 
+# ========== 步骤8: 创建 entrypoint 脚本自动激活 conda 环境 ==========
+RUN set -x && \
+    echo '#!/bin/bash' > /usr/local/bin/entrypoint.sh && \
+    echo '' >> /usr/local/bin/entrypoint.sh && \
+    echo '# 自动激活 conda 环境' >> /usr/local/bin/entrypoint.sh && \
+    echo "source /opt/conda/bin/activate ${CONDA_ENV_NAME}" >> /usr/local/bin/entrypoint.sh && \
+    echo '' >> /usr/local/bin/entrypoint.sh && \
+    echo '# 执行传入的命令（如果没有命令则启动 bash）' >> /usr/local/bin/entrypoint.sh && \
+    echo 'if [ $# -eq 0 ]; then' >> /usr/local/bin/entrypoint.sh && \
+    echo '    exec bash -l' >> /usr/local/bin/entrypoint.sh && \
+    echo 'else' >> /usr/local/bin/entrypoint.sh && \
+    echo '    exec "$@"' >> /usr/local/bin/entrypoint.sh && \
+    echo 'fi' >> /usr/local/bin/entrypoint.sh && \
+    chmod +x /usr/local/bin/entrypoint.sh && \
+    echo "===== entrypoint 脚本创建完成 ====="
+
 # 将conda加入全局PATH，确保环境激活命令可用
 ENV PATH="/opt/conda/bin:${PATH}"
 
 # 设置默认激活环境的环境变量（增强兼容性）
 ENV CONDA_DEFAULT_ENV="${CONDA_ENV_NAME}"
+
+# 设置 entrypoint 自动激活 conda 环境
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
