@@ -539,11 +539,6 @@ jobs:
           cat ${{ env.MANIFEST_FILE }}
           echo "========================================"
 
-      - name: Install FTP client
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y lftp
-
       - name: Upload to FTP server
         env:
           FTP_SERVER: ${{ secrets.FTP_SERVER }}
@@ -557,35 +552,66 @@ jobs:
               REMOTE_PATH="${{ inputs.ftp_remote_path }}"
           fi
 
-          echo "Uploading to: ${FTP_USERNAME}@${FTP_SERVER}:$REMOTE_PATH"
+          # Ensure path ends with /
+          if [[ "${REMOTE_PATH: -1}" != "/" ]]; then
+              REMOTE_PATH="${REMOTE_PATH}/"
+          fi
+
+          echo "=========================================="
+          echo "开始上传到 FTP 服务器"
+          echo "=========================================="
+          echo "FTP 服务器: ${FTP_SERVER}:${{ inputs.ftp_port }}"
+          echo "FTP 用户: ${FTP_USERNAME}"
+          echo "远程路径: ${REMOTE_PATH}"
+          echo ""
+
+          # Build FTP URL
+          FTP_BASE_URL="ftp://${FTP_SERVER}:${{ inputs.ftp_port }}${REMOTE_PATH}"
 
           # Upload with retry logic
           ATTEMPT=1
           MAX_ATTEMPTS=${{ inputs.max_retries }}
 
-          while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
-              echo "Upload attempt $ATTEMPT of $MAX_ATTEMPTS..."
+          upload_file() {
+              local local_file="$1"
+              local remote_file="$2"
 
-              if lftp -c "
-                  set ftp:ssl-allow no;
-                  set ftp:passive-mode on;
-                  set net:timeout 30;
-                  set net:max-retries 3;
-                  set net:reconnect-interval-base 5;
-                  open -u ${FTP_USERNAME},\${FTP_PASSWORD} ${FTP_SERVER}:${{ inputs.ftp_port }};
-                  mkdir -p $REMOTE_PATH;
-                  cd $REMOTE_PATH;
-                  put ${{ env.PACKAGE_FILE }};
-                  put ${{ env.MANIFEST_FILE }};
-                  put scripts/install_packages.sh -o ${{ inputs.install_script_path }};
-                  bye
-              "; then
-                  echo "Upload successful!"
+              echo "上传: $local_file -> $remote_file"
+
+              if curl -T "$local_file" \
+                  "${FTP_BASE_URL}${remote_file}" \
+                  --user "${FTP_USERNAME}:${FTP_PASSWORD}" \
+                  --ftp-create-dirs \
+                  --connect-timeout 30 \
+                  --max-time 600 \
+                  -v; then
+                  echo "✓ 上传成功: $remote_file"
+                  return 0
+              else
+                  echo "✗ 上传失败: $remote_file"
+                  return 1
+              fi
+          }
+
+          while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
+              echo "=========================================="
+              echo "上传尝试 $ATTEMPT / $MAX_ATTEMPTS"
+              echo "=========================================="
+
+              # Upload all files
+              if upload_file "${{ env.PACKAGE_FILE }}" "${{ env.PACKAGE_FILE }}" && \
+                 upload_file "${{ env.MANIFEST_FILE }}" "${{ env.MANIFEST_FILE }}" && \
+                 upload_file "scripts/install_packages.sh" "${{ inputs.install_script_path }}"; then
+                  echo ""
+                  echo "=========================================="
+                  echo "✅ 所有文件上传成功!"
+                  echo "=========================================="
                   break
               else
-                  echo "Upload failed (attempt $ATTEMPT)"
+                  echo ""
+                  echo "上传失败 (尝试 $ATTEMPT)"
                   if [ $ATTEMPT -lt $MAX_ATTEMPTS ]; then
-                      echo "Retrying in 10 seconds..."
+                      echo "等待 10 秒后重试..."
                       sleep 10
                   fi
               fi
@@ -593,7 +619,10 @@ jobs:
           done
 
           if [ $ATTEMPT -gt $MAX_ATTEMPTS ]; then
-              echo "Error: Failed to upload after $MAX_ATTEMPTS attempts"
+              echo ""
+              echo "=========================================="
+              echo "❌ 错误: 上传失败，已重试 $MAX_ATTEMPTS 次"
+              echo "=========================================="
               exit 1
           fi
 
@@ -610,23 +639,26 @@ jobs:
 
       - name: Generate summary
         run: |
-          echo "## Package Extraction Complete" >> $GITHUB_STEP_SUMMARY
+          echo "========================================" >> $GITHUB_STEP_SUMMARY
+          echo "✅ APT 包提取完成!" >> $GITHUB_STEP_SUMMARY
+          echo "========================================" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Archive**: ${{ env.PACKAGE_FILE }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Size**: $(du -h ${{ env.PACKAGE_FILE }} | cut -f1)" >> $GITHUB_STEP_SUMMARY
-          echo "- **Packages**: $(ls -1 apt-packages/*.deb 2>/dev/null | wc -l)" >> $GITHUB_STEP_SUMMARY
-          echo "- **Manifest**: Attached as artifact" >> $GITHUB_STEP_SUMMARY
-          echo "- **FTP Location**: ${{ secrets.FTP_SERVER }}${{ inputs.ftp_remote_path }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **压缩包**: ${{ env.PACKAGE_FILE }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **文件大小**: $(du -h ${{ env.PACKAGE_FILE }} | cut -f1)" >> $GITHUB_STEP_SUMMARY
+          echo "- **包数量**: $(ls -1 apt-packages/*.deb 2>/dev/null | wc -l)" >> $GITHUB_STEP_SUMMARY
+          echo "- **清单文件**: ${{ env.MANIFEST_FILE }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **FTP 位置**: ftp://${{ secrets.FTP_SERVER }}${{ inputs.ftp_remote_path }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Server Installation" >> $GITHUB_STEP_SUMMARY
+          echo "### 服务器安装方法" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
-          echo "# Download and extract" >> $GITHUB_STEP_SUMMARY
+          echo "# 从 FTP 下载并解压" >> $GITHUB_STEP_SUMMARY
           echo "wget ftp://${{ secrets.FTP_SERVER }}${{ inputs.ftp_remote_path }}${{ env.PACKAGE_FILE }}" >> $GITHUB_STEP_SUMMARY
           echo "tar -xzf ${{ env.PACKAGE_FILE }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "# Install (script included in archive)" >> $GITHUB_STEP_SUMMARY
+          echo "# 安装（压缩包中包含安装脚本）" >> $GITHUB_STEP_SUMMARY
           echo "./install_packages.sh" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "========================================" >> $GITHUB_STEP_SUMMARY
 
       - name: Cleanup
         if: always()
