@@ -92,6 +92,15 @@ jobs:
                   apt-rdepends \
                   dpkg-dev \
                   apt-utils && \
+              rm -rf /var/lib/apt/lists/* && \
+              # Ensure we have full Ubuntu repositories (not just CUDA repos)
+              # Detect Ubuntu version and add standard repos if missing
+              . /etc/os-release && \
+              echo "Detected OS: $ID $VERSION_ID" && \
+              apt-get update && \
+              (grep -q "http://archive.ubuntu.com/ubuntu/" /etc/apt/sources.list /etc/apt/sources.list.d/*.list 2>/dev/null || \
+               echo "deb http://archive.ubuntu.com/ubuntu/ $VERSION_CODENAME main restricted universe multiverse" > /etc/apt/sources.list.d/ubuntu.list) && \
+              apt-get update && \
               rm -rf /var/lib/apt/lists/*
 
           RUN mkdir -p /packages && \
@@ -155,25 +164,35 @@ jobs:
 
           # Get complete dependency tree
           echo "Resolving dependencies..."
+          echo "Running apt-rdepends on: $APT_PACKAGES"
+
           if [ "$INCLUDE_RECOMMENDS" = "true" ]; then
               ALL_PACKAGES=$(apt-rdepends --print-state --follow=ALL \
-                  $(echo "$APT_PACKAGES") 2>/dev/null | \
+                  $(echo "$APT_PACKAGES") 2>&1 | \
                   grep -E "^Package:" | cut -d' ' -f2 | sort -u)
           else
               ALL_PACKAGES=$(apt-rdepends --print-state --follow=ALL --no-recommends \
-                  $(echo "$APT_PACKAGES") 2>/dev/null | \
+                  $(echo "$APT_PACKAGES") 2>&1 | \
                   grep -E "^Package:" | cut -d' ' -f2 | sort -u)
           fi
 
+          echo "All packages (including virtual): $(echo $ALL_PACKAGES | wc -w)"
+
           # Filter out virtual packages
+          echo "Filtering out virtual packages..."
           REAL_PACKAGES=""
+          FILTERED_COUNT=0
           for pkg in $ALL_PACKAGES; do
               if apt-cache show "$pkg" &>/dev/null; then
                   REAL_PACKAGES="$REAL_PACKAGES $pkg"
+              else
+                  FILTERED_COUNT=$((FILTERED_COUNT + 1))
               fi
           done
 
-          echo "Total packages to download: $(echo $REAL_PACKAGES | wc -w)"
+          echo "Filtered out $FILTERED_COUNT virtual/unavailable packages"
+          echo "Total real packages to download: $(echo $REAL_PACKAGES | wc -w)"
+          echo "First 10 packages: $(echo $REAL_PACKAGES | tr ' ' '\n' | head -10)"
           echo
 
           # Download all .deb files
