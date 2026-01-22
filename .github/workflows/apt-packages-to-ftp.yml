@@ -367,13 +367,20 @@ jobs:
 
           echo ""
           echo "Copying packages from container..."
-          docker cp apt-extractor-container:/packages ./apt-packages/ 2>/dev/null || {
+
+          # Ensure target directory exists
+          mkdir -p apt-packages
+          mkdir -p scripts
+
+          echo "Copying /packages from container..."
+          docker cp apt-extractor-container:/packages/. ./apt-packages/ || {
               echo "ERROR: Failed to copy /packages from container"
               echo "Container status:"
               docker ps -a --filter "name=apt-extractor-container"
               exit 1
           }
 
+          echo "Copying /scripts/package_manifest.txt from container..."
           docker cp apt-extractor-container:/scripts/package_manifest.txt ./scripts/ 2>/dev/null || echo "Warning: No manifest file found"
 
           echo ""
@@ -387,17 +394,22 @@ jobs:
 
           echo ""
           echo "Downloaded packages:"
-          ls -lh apt-packages/*.deb 2>/dev/null || echo "No .deb files found in apt-packages/"
+          ls -lh apt-packages/*.deb 2>/dev/null | head -20 || echo "No .deb files found in apt-packages/"
+
+          TOTAL_DEBS=$(ls -1 apt-packages/*.deb 2>/dev/null | wc -l)
+          if [ "$TOTAL_DEBS" -gt 20 ]; then
+              echo "... and $(($TOTAL_DEBS - 20)) more files"
+          fi
+
           echo ""
-          echo "Total package count: $(ls -1 apt-packages/*.deb 2>/dev/null | wc -l)"
+          echo "Total package count: $TOTAL_DEBS"
 
           # Fail if no packages were downloaded
-          DEB_COUNT=$(ls -1 apt-packages/*.deb 2>/dev/null | wc -l)
-          if [ "$DEB_COUNT" -eq 0 ]; then
+          if [ "$TOTAL_DEBS" -eq 0 ]; then
               echo ""
               echo "ERROR: No .deb files were downloaded!"
               echo ""
-              echo "Container files:"
+              echo "Checking container files..."
               docker run --rm apt-extractor ls -la /packages 2>/dev/null || echo "Could not list container files"
               echo ""
               echo "Package manifest contents:"
