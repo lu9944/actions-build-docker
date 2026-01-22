@@ -5,12 +5,17 @@ on:
     inputs:
       base_image:
         description: 'Base Docker image (must match target system architecture)'
-        required: true
-        default: 'pytorch/pytorch:2.9.0-cuda12.6-cudnn9-devel'
+        required: false
+        default: 'ubuntu:22.04'
+
+      dockerfile_path:
+        description: 'Path to Dockerfile to auto-extract APT packages from (optional, overrides apt_packages if set)'
+        required: false
+        default: ''
 
       apt_packages:
-        description: 'APT packages to extract (space-separated, will include all dependencies)'
-        required: true
+        description: 'APT packages to extract (space-separated, will include all dependencies). Ignored if dockerfile_path is set.'
+        required: false
         default: 'build-essential iputils-ping net-tools iproute2 curl dnsutils tcpdump netcat-openbsd vim sudo unzip zip screen libgl1-mesa-glx htop git openssh-server libsm6 libxext6 ninja-build libglib2.0-0 libxrender-dev gcc g++ make cmake file wget'
 
       include_recommends:
@@ -62,6 +67,62 @@ jobs:
           echo "SCRIPT_FILE=install_packages_$(date +%Y%m%d-%H%M%S).sh" >> $GITHUB_ENV
           echo "MANIFEST_FILE=package_manifest_$(date +%Y%m%d-%H%M%S).txt" >> $GITHUB_ENV
 
+      - name: Parse packages from Dockerfile
+        if: inputs.dockerfile_path != ''
+        run: |
+          echo "=== Parsing APT packages from Dockerfile ==="
+          echo "Dockerfile path: ${{ inputs.dockerfile_path }}"
+
+          if [ ! -f "${{ inputs.dockerfile_path }}" ]; then
+              echo "Error: Dockerfile not found at ${{ inputs.dockerfile_path }}"
+              exit 1
+          fi
+
+          # Extract packages from apt install / apt-get install commands
+          # Handles multi-line commands with backslashes
+          PARSED_PACKAGES=$(
+              cat "${{ inputs.dockerfile_path }}" | \
+              # Convert backslash continuations to single lines
+              sed ':a; /\\$/N; s/\\\n//; ta' | \
+              # Find apt install/apt-get install lines and extract package list
+              grep -iE '^\s*(RUN|CMD)\s+(apt|apt-get)\s+install' | \
+              # Remove the RUN/CMD and install keywords
+              sed -E 's/^\s*(RUN|CMD)\s+(apt|apt-get)\s+install\s+(--yes|--assume-yes|-y)\s*//i' | \
+              sed -E 's/\s+(--yes|--assume-yes|-y)\s*/ /g' | \
+              # Remove common apt options
+              sed -E 's/--[a-z-]+\s*=?\s*[^\s]*//g' | \
+              # Remove pip and other non-apt commands that might be on same line
+              sed -E 's/&&.*//g' | \
+              sed -E 's/\|.*//g' | \
+              # Clean up whitespace and special characters
+              tr -s '[:space:]' ' ' | \
+              sed -E 's/^\s+//; s/\s+$//' | \
+              # Remove -y flags that might remain
+              sed -E 's/\s+-y\s*/ /g' | \
+              tr ' ' '\n' | \
+              # Filter out empty lines and options
+              grep -vE '^(--?|-$|&&|pip|pip3|npm|\.|/)' | \
+              sort -u | \
+              tr '\n' ' '
+          )
+
+          if [ -z "$PARSED_PACKAGES" ]; then
+              echo "Warning: No packages found in Dockerfile"
+              echo "Showing Dockerfile content for debugging:"
+              cat "${{ inputs.dockerfile_path }}"
+              exit 1
+          fi
+
+          echo "Packages found: $PARSED_PACKAGES"
+          echo "EXTRACTED_PACKAGES=$PARSED_PACKAGES" >> $GITHUB_ENV
+          echo "PACKAGE_COUNT=$(echo $PARSED_PACKAGES | wc -w)" >> $GITHUB_ENV
+
+          echo ""
+          echo "=== Extracted Packages ==="
+          echo "$PARSED_PACKAGES" | tr ' ' '\n' | nl
+          echo "==========================="
+          echo "Total: $(echo $PARSED_PACKAGES | wc -w) packages"
+
       - name: Create working directories
         run: |
           mkdir -p apt-packages
@@ -71,7 +132,13 @@ jobs:
         run: |
           echo "=== APT Package Extraction Configuration ==="
           echo "Base Image: ${{ inputs.base_image }}"
-          echo "Packages: ${{ inputs.apt_packages }}"
+          if [ -n "${{ inputs.dockerfile_path }}" ]; then
+              echo "Dockerfile: ${{ inputs.dockerfile_path }}"
+              echo "Packages (extracted): ${{ env.EXTRACTED_PACKAGES }}"
+              echo "Package Count: ${{ env.PACKAGE_COUNT }}"
+          else
+              echo "Packages (manual): ${{ inputs.apt_packages }}"
+          fi
           echo "Include Recommends: ${{ inputs.include_recommends }}"
           echo "FTP Server: ${{ secrets.FTP_SERVER }}:${{ inputs.ftp_port }}"
           echo "FTP Username: ${{ secrets.FTP_USERNAME }}"
@@ -311,7 +378,7 @@ jobs:
         env:
           BASE_IMAGE: ${{ inputs.base_image }}
           INCLUDE_RECOMMENDS: ${{ inputs.include_recommends }}
-          APT_PACKAGES: ${{ inputs.apt_packages }}
+          APT_PACKAGES: ${{ inputs.dockerfile_path != '' && env.EXTRACTED_PACKAGES || inputs.apt_packages }}
         run: |
           docker build \
               --build-arg BASE_IMAGE="$BASE_IMAGE" \
