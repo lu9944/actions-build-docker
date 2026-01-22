@@ -180,6 +180,13 @@ jobs:
           echo "Resolving dependencies..."
           echo "Running apt-rdepends on: $APT_PACKAGES"
 
+          # Test apt-rdepends on first package
+          FIRST_PKG=$(echo "$APT_PACKAGES" | awk '{print $1}')
+          echo "Testing apt-rdepends on first package: $FIRST_PKG"
+          echo "=== apt-rdepends output for $FIRST_PKG ==="
+          apt-rdepends "$FIRST_PKG" 2>&1 | head -30
+          echo "======================================="
+
           if [ "$INCLUDE_RECOMMENDS" = "true" ]; then
               ALL_PACKAGES=$(apt-rdepends --print-state --follow=ALL \
                   $(echo "$APT_PACKAGES") 2>&1 | \
@@ -191,6 +198,7 @@ jobs:
           fi
 
           echo "All packages (including virtual): $(echo $ALL_PACKAGES | wc -w)"
+          echo "Package list content: '$ALL_PACKAGES'"
 
           # Filter out virtual packages
           echo "Filtering out virtual packages..."
