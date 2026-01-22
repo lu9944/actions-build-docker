@@ -659,20 +659,33 @@ jobs:
           cp scripts/install_packages_standalone.sh apt-packages/install_packages.sh
 
           # Copy pip packages to the same directory
-          if [ -d pip-packages ] && [ "$(ls -A pip-packages)" ]; then
-              cp pip-packages/*.whl pip-packages/*.tar.gz apt-packages/ 2>/dev/null || true
+          if [ -d pip-packages ] && [ "$(ls -A pip-packages 2>/dev/null)" ]; then
+              cp pip-packages/*.whl apt-packages/ 2>/dev/null || true
+              cp pip-packages/*.tar.gz apt-packages/ 2>/dev/null || true
           fi
 
           cd apt-packages
+
+          # Count packages
           DEB_COUNT=$(ls -1 *.deb 2>/dev/null | wc -l)
-          PIP_COUNT=$(ls -1 *.whl *.tar.gz 2>/dev/null | wc -l)
-          tar -czf ../${{ env.PACKAGE_FILE }} *.deb *.whl *.tar.gz install_packages.sh
+          WHEEL_COUNT=$(ls -1 *.whl 2>/dev/null | wc -l)
+          TAR_COUNT=$(ls -1 *.tar.gz 2>/dev/null | wc -l)
+          PIP_COUNT=$((WHEEL_COUNT + TAR_COUNT))
+
+          # Build tar command with only existing files
+          TAR_FILES="install_packages.sh"
+          [ "$DEB_COUNT" -gt 0 ] && TAR_FILES="$TAR_FILES *.deb"
+          [ "$WHEEL_COUNT" -gt 0 ] && TAR_FILES="$TAR_FILES *.whl"
+          [ "$TAR_COUNT" -gt 0 ] && TAR_FILES="$TAR_FILES *.tar.gz"
+
+          # Create archive
+          tar -czf ../${{ env.PACKAGE_FILE }} $TAR_FILES
           cd ..
 
           echo ""
           echo "Archive created: ${{ env.PACKAGE_FILE }}"
           echo "Size: $(du -h ${{ env.PACKAGE_FILE }} | cut -f1)"
-          echo "Contains: $DEB_COUNT APT packages + $PIP_COUNT pip packages + installation script"
+          echo "Contains: $DEB_COUNT APT packages + $WHEEL_COUNT wheels + $TAR_COUNT tar.gz + installation script"
 
       - name: Display package information
         run: |
