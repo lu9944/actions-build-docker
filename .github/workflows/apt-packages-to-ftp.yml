@@ -81,7 +81,7 @@ jobs:
       - name: Create Dockerfile for package extraction
         run: |
           cat > Dockerfile.extract << 'EOF'
-          ARG BASE_IMAGE
+          ARG BASE_IMAGE=ubuntu:22.04
           FROM ${BASE_IMAGE}
 
           ENV DEBIAN_FRONTEND=noninteractive
@@ -183,22 +183,41 @@ jobs:
           # Test apt-rdepends on first package
           FIRST_PKG=$(echo "$APT_PACKAGES" | awk '{print $1}')
           echo "Testing apt-rdepends on first package: $FIRST_PKG"
-          echo "=== apt-rdepends output for $FIRST_PKG ==="
-          apt-rdepends "$FIRST_PKG" 2>&1 | head -30
+          echo "=== apt-rdepends output for $FIRST_PKG (raw) ==="
+          apt-rdepends "$FIRST_PKG" 2>&1 | head -50
           echo "======================================="
 
+          # Try multiple methods to get package list
+          echo "=== Method 1: apt-rdepends with --print-state ==="
           if [ "$INCLUDE_RECOMMENDS" = "true" ]; then
-              ALL_PACKAGES=$(apt-rdepends --print-state --follow=ALL \
-                  $(echo "$APT_PACKAGES") 2>&1 | \
-                  grep -E "^Package:" | cut -d' ' -f2 | sort -u)
+              METHOD1_OUTPUT=$(apt-rdepends --print-state --follow=ALL \
+                  $(echo "$APT_PACKAGES") 2>&1 || true)
           else
-              ALL_PACKAGES=$(apt-rdepends --print-state --follow=ALL --no-recommends \
-                  $(echo "$APT_PACKAGES") 2>&1 | \
-                  grep -E "^Package:" | cut -d' ' -f2 | sort -u)
+              METHOD1_OUTPUT=$(apt-rdepends --print-state --follow=ALL --no-recommends \
+                  $(echo "$APT_PACKAGES") 2>&1 || true)
+          fi
+          echo "$METHOD1_OUTPUT" | head -30
+          ALL_PACKAGES=$(echo "$METHOD1_OUTPUT" | grep -E "^Package:" | cut -d' ' -f2 | sort -u)
+          echo "Method 1 found $(echo $ALL_PACKAGES | wc -w) packages"
+
+          # If method 1 fails, try method 2 (without --print-state)
+          if [ -z "$ALL_PACKAGES" ]; then
+              echo "=== Method 2: apt-rdepends without --print-state ==="
+              if [ "$INCLUDE_RECOMMENDS" = "true" ]; then
+                  METHOD2_OUTPUT=$(apt-rdepends --follow=ALL \
+                      $(echo "$APT_PACKAGES") 2>&1 || true)
+              else
+                  METHOD2_OUTPUT=$(apt-rdepends --follow=ALL --no-recommends \
+                      $(echo "$APT_PACKAGES") 2>&1 || true)
+              fi
+              echo "$METHOD2_OUTPUT" | head -30
+              # Extract package names from apt-rdepends output (lines without dependencies)
+              ALL_PACKAGES=$(echo "$METHOD2_OUTPUT" | grep -vE " |Depends:|Recommends:|Suggests:|PreDepends:" | sort -u)
+              echo "Method 2 found $(echo $ALL_PACKAGES | wc -w) packages"
           fi
 
-          echo "All packages (including virtual): $(echo $ALL_PACKAGES | wc -w)"
-          echo "Package list content: '$ALL_PACKAGES'"
+          echo "Final ALL_PACKAGES count: $(echo $ALL_PACKAGES | wc -w)"
+          echo "Package list content (first 20): $(echo $ALL_PACKAGES | tr ' ' '\n' | head -20 | tr '\n' ' ')"
 
           # Filter out virtual packages
           echo "Filtering out virtual packages..."
