@@ -106,7 +106,14 @@ jobs:
           ARG APT_PACKAGES=""
           ENV APT_PACKAGES="${APT_PACKAGES}"
 
-          RUN /tmp/download_packages.sh "$APT_PACKAGES"
+          RUN echo "=== Starting package download ===" && \
+              echo "DEBUG: APT_PACKAGES='${APT_PACKAGES}'" && \
+              echo "DEBUG: INCLUDE_RECOMMENDS=${INCLUDE_RECOMMENDS}" && \
+              /tmp/download_packages.sh && \
+              echo "=== Package download completed ===" && \
+              echo "=== Listing downloaded packages ===" && \
+              ls -lh /packages/*.deb 2>/dev/null | head -20 || echo "ERROR: No .deb files found!" && \
+              echo "=== Total .deb files: $(ls -1 /packages/*.deb 2>/dev/null | wc -l) ==="
 
           CMD ["/bin/bash"]
           EOF
@@ -117,12 +124,16 @@ jobs:
           #!/bin/bash
           set -e
 
-          APT_PACKAGES="${APT_PACKAGES:-$*}"
+          echo "DEBUG: Script started"
+          echo "DEBUG: APT_PACKAGES env var = '${APT_PACKAGES}'"
 
+          # Use environment variable directly
           if [ -z "$APT_PACKAGES" ]; then
-              echo "Error: No packages specified"
+              echo "ERROR: No packages specified (APT_PACKAGES is empty)"
               exit 1
           fi
+
+          echo "INFO: Packages to extract: $APT_PACKAGES"
 
           echo "========================================"
           echo "APT Package Extraction Script"
@@ -250,9 +261,19 @@ jobs:
 
           echo ""
           echo "Downloaded packages:"
-          ls -lh apt-packages/*.deb || echo "No .deb files found"
+          ls -lh apt-packages/*.deb 2>/dev/null || echo "No .deb files found in apt-packages/"
           echo ""
           echo "Total package count: $(ls -1 apt-packages/*.deb 2>/dev/null | wc -l)"
+
+          # Fail if no packages were downloaded
+          DEB_COUNT=$(ls -1 apt-packages/*.deb 2>/dev/null | wc -l)
+          if [ "$DEB_COUNT" -eq 0 ]; then
+              echo ""
+              echo "ERROR: No .deb files were downloaded!"
+              echo "Package manifest contents:"
+              cat scripts/package_manifest.txt 2>/dev/null || echo "No manifest file found"
+              exit 1
+          fi
 
       - name: Create installation script
         run: |
