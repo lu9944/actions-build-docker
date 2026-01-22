@@ -81,6 +81,7 @@ jobs:
       - name: Create Dockerfile for package extraction
         run: |
           cat > Dockerfile.extract << 'EOF'
+          ARG BASE_IMAGE
           FROM ${BASE_IMAGE}
 
           ENV DEBIAN_FRONTEND=noninteractive
