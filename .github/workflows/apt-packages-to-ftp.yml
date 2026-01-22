@@ -349,19 +349,41 @@ jobs:
       - name: Extract packages from container
         run: |
           echo "Running container to download packages..."
-          docker run --name apt-extractor-container apt-extractor || true
+          docker run --name apt-extractor-container apt-extractor
+          CONTAINER_EXIT_CODE=$?
+
+          echo ""
+          echo "Container exit code: $CONTAINER_EXIT_CODE"
+
+          if [ $CONTAINER_EXIT_CODE -ne 0 ]; then
+              echo ""
+              echo "WARNING: Container exited with code $CONTAINER_EXIT_CODE"
+              echo "Checking container logs for errors..."
+              echo ""
+              docker logs apt-extractor-container || true
+              echo ""
+              echo "Attempting to copy files anyway..."
+          fi
 
           echo ""
           echo "Copying packages from container..."
-          docker cp apt-extractor-container:/packages ./apt-packages/
-          docker cp apt-extractor-container:/scripts/package_manifest.txt ./scripts/
+          docker cp apt-extractor-container:/packages ./apt-packages/ 2>/dev/null || {
+              echo "ERROR: Failed to copy /packages from container"
+              echo "Container status:"
+              docker ps -a --filter "name=apt-extractor-container"
+              exit 1
+          }
+
+          docker cp apt-extractor-container:/scripts/package_manifest.txt ./scripts/ 2>/dev/null || echo "Warning: No manifest file found"
 
           echo ""
           echo "Removing container..."
           docker rm apt-extractor-container
 
           # Copy manifest to root
-          cp scripts/package_manifest.txt ${{ env.MANIFEST_FILE }}
+          if [ -f scripts/package_manifest.txt ]; then
+              cp scripts/package_manifest.txt ${{ env.MANIFEST_FILE }}
+          fi
 
           echo ""
           echo "Downloaded packages:"
@@ -374,6 +396,10 @@ jobs:
           if [ "$DEB_COUNT" -eq 0 ]; then
               echo ""
               echo "ERROR: No .deb files were downloaded!"
+              echo ""
+              echo "Container files:"
+              docker run --rm apt-extractor ls -la /packages 2>/dev/null || echo "Could not list container files"
+              echo ""
               echo "Package manifest contents:"
               cat scripts/package_manifest.txt 2>/dev/null || echo "No manifest file found"
               exit 1
