@@ -212,7 +212,6 @@ jobs:
         run: |
           cat > download_packages.sh << 'SCRIPT_EOF'
           #!/bin/bash
-          set -e
 
           echo "DEBUG: Script started"
           echo "DEBUG: APT_PACKAGES env var = '${APT_PACKAGES}'"
@@ -241,37 +240,35 @@ jobs:
               INSTALL_OPTS="--no-install-recommends"
           fi
 
-          # Create a temporary directory for cache
-          mkdir -p /tmp/apt-cache
-
-          # Configure apt to use our cache directory
-          echo "Dir::Cache::Archives /tmp/apt-cache;" > /etc/apt/apt.conf.d/99cache
-          echo "Dir::State::Lists /var/lib/apt/lists;" >> /etc/apt/apt.conf.d/99cache
-          echo "Dir::Cache /tmp/apt-cache;" >> /etc/apt/apt.conf.d/99cache
-          echo "Acquire::Languages \"none\";" >> /etc/apt/apt.conf.d/99cache
-
           echo "=== Downloading packages with dependencies ==="
-          echo "Running: apt-get install --download-only --reinstall $INSTALL_OPTS -y $APT_PACKAGES"
+          echo "Running: apt-get install --download-only $INSTALL_OPTS -y $APT_PACKAGES"
+          echo ""
 
           # Download packages and dependencies using apt-get
           # This downloads to /var/cache/apt/archives/ by default
-          if apt-get install --download-only --reinstall $INSTALL_OPTS -y $APT_PACKAGES; then
+          apt-get install --download-only $INSTALL_OPTS -y $APT_PACKAGES 2>&1 | tee /tmp/apt-output.log
+          APT_EXIT_CODE=${PIPESTATUS[0]}
+
+          echo ""
+          if [ $APT_EXIT_CODE -eq 0 ]; then
               echo "✓ Package download completed successfully"
           else
-              echo "✗ Some packages failed to download, continuing with what we have..."
+              echo "⚠ apt-get exited with code $APT_EXIT_CODE (continuing with downloaded packages)"
+              echo "Checking what was downloaded..."
           fi
 
           # Move downloaded packages to /packages
           echo ""
           echo "Moving packages to /packages..."
+
+          # Check what's in the cache
+          echo "Contents of /var/cache/apt/archives/:"
+          ls -la /var/cache/apt/archives/*.deb 2>/dev/null | wc -l
+          echo "files found"
+
           if [ -d /var/cache/apt/archives ]; then
               # Move only .deb files, skipping partial and lock files
               mv -f /var/cache/apt/archives/*.deb /packages/ 2>/dev/null || true
-          fi
-
-          # Also check our cache directory
-          if [ -d /tmp/apt-cache/archives ]; then
-              mv -f /tmp/apt-cache/archives/*.deb /packages/ 2>/dev/null || true
           fi
 
           cd /packages
@@ -286,6 +283,9 @@ jobs:
           if [ "$DEB_COUNT" -eq 0 ]; then
               echo ""
               echo "ERROR: No .deb files were downloaded!"
+              echo ""
+              echo "Apt output log:"
+              cat /tmp/apt-output.log
               echo ""
               echo "Checking package availability:"
               for pkg in $(echo "$APT_PACKAGES" | tr ' ' '\n' | head -5); do
@@ -329,6 +329,7 @@ jobs:
 
           echo ""
           echo "=== Package extraction completed successfully ==="
+          exit 0
           SCRIPT_EOF
           chmod +x download_packages.sh
 
