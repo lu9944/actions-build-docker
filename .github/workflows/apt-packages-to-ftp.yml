@@ -1,0 +1,471 @@
+name: Extract APT Packages and Upload to FTP
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_image:
+        description: 'Base Docker image (must match target system architecture)'
+        required: true
+        default: 'pytorch/pytorch:2.9.0-cuda12.6-cudnn9-devel'
+
+      apt_packages:
+        description: 'APT packages to extract (space-separated, will include all dependencies)'
+        required: true
+        default: 'build-essential iputils-ping net-tools iproute2 curl dnsutils tcpdump netcat-openbsd vim sudo unzip zip screen libgl1-mesa-glx htop git openssh-server libsm6 libxext6 ninja-build libglib2.0-0 libxrender-dev gcc g++ make cmake file wget'
+
+      include_recommends:
+        description: 'Include recommended packages'
+        required: false
+        type: boolean
+        default: true
+
+      ftp_port:
+        description: 'FTP server port'
+        required: false
+        default: '21'
+
+      ftp_remote_path:
+        description: 'Remote path on FTP server (will be created if not exists)'
+        required: false
+        default: '/apt-packages'
+
+      ftp_create_subdir:
+        description: 'Create timestamped subdirectory on FTP'
+        required: false
+        type: boolean
+        default: false
+
+      install_script_path:
+        description: 'Installation script path on server (empty to skip)'
+        required: false
+        default: 'install_packages.sh'
+
+      max_retries:
+        description: 'FTP upload max retries'
+        required: false
+        type: choice
+        options:
+          - '1'
+          - '3'
+          - '5'
+        default: '3'
+
+jobs:
+  extract-and-upload:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set output variables
+        run: |
+          echo "TIMESTAMP=$(date +%Y%m%d-%H%M%S)" >> $GITHUB_ENV
+          echo "PACKAGE_FILE=apt-packages-$(date +%Y%m%d-%H%M%S).tar.gz" >> $GITHUB_ENV
+          echo "SCRIPT_FILE=install_packages_$(date +%Y%m%d-%H%M%S).sh" >> $GITHUB_ENV
+          echo "MANIFEST_FILE=package_manifest_$(date +%Y%m%d-%H%M%S).txt" >> $GITHUB_ENV
+
+      - name: Create working directories
+        run: |
+          mkdir -p apt-packages
+          mkdir -p scripts
+
+      - name: Display configuration
+        run: |
+          echo "=== APT Package Extraction Configuration ==="
+          echo "Base Image: ${{ inputs.base_image }}"
+          echo "Packages: ${{ inputs.apt_packages }}"
+          echo "Include Recommends: ${{ inputs.include_recommends }}"
+          echo "FTP Server: ${{ secrets.FTP_SERVER }}:${{ inputs.ftp_port }}"
+          echo "FTP Username: ${{ secrets.FTP_USERNAME }}"
+          echo "FTP Remote Path: ${{ inputs.ftp_remote_path }}"
+          echo "Create Subdir: ${{ inputs.ftp_create_subdir }}"
+
+      - name: Create Dockerfile for package extraction
+        run: |
+          cat > Dockerfile.extract << 'EOF'
+          FROM ${BASE_IMAGE}
+
+          ENV DEBIAN_FRONTEND=noninteractive
+          ENV TZ=UTC
+
+          RUN apt-get update && \
+              apt-get install -y --no-install-recommends \
+                  apt-rdepends \
+                  dpkg-dev \
+                  apt-utils && \
+              rm -rf /var/lib/apt/lists/*
+
+          RUN mkdir -p /packages && \
+              mkdir -p /scripts
+
+          COPY download_packages.sh /tmp/download_packages.sh
+          RUN chmod +x /tmp/download_packages.sh
+
+          ARG INCLUDE_RECOMMENDS=true
+          ENV INCLUDE_RECOMMENDS=${INCLUDE_RECOMMENDS}
+
+          ARG APT_PACKAGES=""
+          ENV APT_PACKAGES="${APT_PACKAGES}"
+
+          RUN /tmp/download_packages.sh "$APT_PACKAGES"
+
+          CMD ["/bin/bash"]
+          EOF
+
+      - name: Create package download script
+        run: |
+          cat > download_packages.sh << 'SCRIPT_EOF'
+          #!/bin/bash
+          set -e
+
+          APT_PACKAGES="${APT_PACKAGES:-$*}"
+
+          if [ -z "$APT_PACKAGES" ]; then
+              echo "Error: No packages specified"
+              exit 1
+          fi
+
+          echo "========================================"
+          echo "APT Package Extraction Script"
+          echo "========================================"
+          echo "Packages to extract: $APT_PACKAGES"
+          echo "Include recommends: $INCLUDE_RECOMMENDS"
+          echo "========================================"
+          echo
+
+          # Update package lists
+          echo "Updating package lists..."
+          apt-get update
+
+          # Install apt-rdepends if not available
+          if ! command -v apt-rdepends &> /dev/null; then
+              echo "Installing apt-rdepends..."
+              apt-get install -y apt-rdepends dpkg-dev
+          fi
+
+          # Get complete dependency tree
+          echo "Resolving dependencies..."
+          if [ "$INCLUDE_RECOMMENDS" = "true" ]; then
+              ALL_PACKAGES=$(apt-rdepends --print-state --follow=ALL \
+                  $(echo "$APT_PACKAGES") 2>/dev/null | \
+                  grep -E "^Package:" | cut -d' ' -f2 | sort -u)
+          else
+              ALL_PACKAGES=$(apt-rdepends --print-state --follow=ALL --no-recommends \
+                  $(echo "$APT_PACKAGES") 2>/dev/null | \
+                  grep -E "^Package:" | cut -d' ' -f2 | sort -u)
+          fi
+
+          # Filter out virtual packages
+          REAL_PACKAGES=""
+          for pkg in $ALL_PACKAGES; do
+              if apt-cache show "$pkg" &>/dev/null; then
+                  REAL_PACKAGES="$REAL_PACKAGES $pkg"
+              fi
+          done
+
+          echo "Total packages to download: $(echo $REAL_PACKAGES | wc -w)"
+          echo
+
+          # Download all .deb files
+          cd /packages
+          DOWNLOADED=0
+          FAILED=0
+
+          for pkg in $REAL_PACKAGES; do
+              if apt-get download "$pkg" 2>/dev/null; then
+                  DOWNLOADED=$((DOWNLOADED + 1))
+              else
+                  echo "Warning: Failed to download $pkg"
+                  FAILED=$((FAILED + 1))
+              fi
+          done
+
+          echo
+          echo "========================================"
+          echo "Download Summary"
+          echo "========================================"
+          echo "Successfully downloaded: $DOWNLOADED packages"
+          echo "Failed downloads: $FAILED packages"
+          echo "Total .deb files: $(ls -1 *.deb 2>/dev/null | wc -l)"
+          echo "Total size: $(du -sh . | cut -f1)"
+          echo "========================================"
+
+          # Generate package manifest with versions
+          echo "Generating package manifest..."
+          {
+              echo "APT Package Manifest"
+              echo "Generated: $(date -u +"%Y-%m-%d %H:%M:%S UTC")"
+              echo "Base Image: ${BASE_IMAGE:-unknown}"
+              echo "Requested Packages: $APT_PACKAGES"
+              echo "Include Recommends: $INCLUDE_RECOMMENDS"
+              echo ""
+              echo "Package List:"
+              echo "========================================"
+              for deb in *.deb; do
+                  if [ -f "$deb" ]; then
+                      name=$(dpkg-deb -f "$deb" Package 2>/dev/null || echo "$deb")
+                      version=$(dpkg-deb -f "$deb" Version 2>/dev/null || echo "unknown")
+                      size=$(du -h "$deb" | cut -f1)
+                      echo "$name | $version | $size | $deb"
+                  fi
+              done
+          } > /scripts/package_manifest.txt
+
+          # List all downloaded packages
+          ls -lh /packages/*.deb 2>/dev/null | head -20
+          if [ $(ls -1 /packages/*.deb 2>/dev/null | wc -l) -gt 20 ]; then
+              echo "... and $(($(ls -1 /packages/*.deb 2>/dev/null | wc -l) - 20)) more files"
+          fi
+          SCRIPT_EOF
+          chmod +x download_packages.sh
+
+      - name: Build extraction container
+        env:
+          BASE_IMAGE: ${{ inputs.base_image }}
+          INCLUDE_RECOMMENDS: ${{ inputs.include_recommends }}
+          APT_PACKAGES: ${{ inputs.apt_packages }}
+        run: |
+          docker build \
+              --build-arg BASE_IMAGE="$BASE_IMAGE" \
+              --build-arg INCLUDE_RECOMMENDS="$INCLUDE_RECOMMENDS" \
+              --build-arg APT_PACKAGES="$APT_PACKAGES" \
+              -f Dockerfile.extract \
+              -t apt-extractor .
+
+      - name: Extract packages from container
+        run: |
+          echo "Running container to download packages..."
+          docker run --name apt-extractor-container apt-extractor || true
+
+          echo ""
+          echo "Copying packages from container..."
+          docker cp apt-extractor-container:/packages ./apt-packages/
+          docker cp apt-extractor-container:/scripts/package_manifest.txt ./scripts/
+
+          echo ""
+          echo "Removing container..."
+          docker rm apt-extractor-container
+
+          # Copy manifest to root
+          cp scripts/package_manifest.txt ${{ env.MANIFEST_FILE }}
+
+          echo ""
+          echo "Downloaded packages:"
+          ls -lh apt-packages/*.deb || echo "No .deb files found"
+          echo ""
+          echo "Total package count: $(ls -1 apt-packages/*.deb 2>/dev/null | wc -l)"
+
+      - name: Create installation script
+        run: |
+          cat > scripts/install_packages.sh << 'INSTALL_EOF'
+          #!/bin/bash
+          set -e
+
+          echo "========================================"
+          echo "APT Package Installation Script"
+          echo "========================================"
+          echo
+
+          SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+          cd "$SCRIPT_DIR"
+
+          TAR_FILE="${1:-apt-packages-*.tar.gz}"
+
+          if [ ! -f $TAR_FILE ]; then
+              echo "Error: Cannot find package archive: $TAR_FILE"
+              echo "Usage: $0 [archive_file.tar.gz]"
+              exit 1
+          fi
+
+          echo "Archive: $TAR_FILE"
+          echo "Extracting..."
+          tar -xzf "$TAR_FILE"
+
+          echo ""
+          echo "Installing packages (requires sudo)..."
+          echo "This may take a while..."
+
+          if [ "$EUID" -ne 0 ]; then
+              echo "Restarting with sudo..."
+              exec sudo bash "$0" "$@"
+          fi
+
+          # Install all .deb files
+          dpkg -i *.deb || true
+
+          # Fix any broken dependencies
+          echo ""
+          echo "Fixing broken dependencies..."
+          apt-get install -f -y
+
+          echo ""
+          echo "Cleaning up..."
+          rm -f *.deb
+          rm -f "$0"
+
+          echo ""
+          echo "========================================"
+          echo "Installation completed successfully!"
+          echo "========================================"
+          INSTALL_EOF
+
+          chmod +x scripts/install_packages.sh
+
+          # Create standalone version for archive
+          cat > scripts/install_packages_standalone.sh << 'STANDALONE_EOF'
+          #!/bin/bash
+          set -e
+
+          # This script must be in the same directory as the .deb files
+          # Extract the tar.gz first, then run this script
+
+          echo "Installing APT packages..."
+
+          if [ "$EUID" -ne 0 ]; then
+              echo "This script requires root privileges. Restarting with sudo..."
+              exec sudo bash "$0" "$@"
+          fi
+
+          SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+          cd "$SCRIPT_DIR"
+
+          DEB_COUNT=$(ls -1 *.deb 2>/dev/null | wc -l)
+
+          if [ "$DEB_COUNT" -eq 0 ]; then
+              echo "Error: No .deb files found in current directory"
+              echo "Please extract the tar.gz archive first."
+              exit 1
+          fi
+
+          echo "Found $DEB_COUNT package files"
+          echo "Installing..."
+
+          dpkg -i *.deb || true
+          apt-get install -f -y
+
+          echo ""
+          echo "Installation completed!"
+          STANDALONE_EOF
+
+          chmod +x scripts/install_packages_standalone.sh
+
+      - name: Create tar archive with installation script
+        run: |
+          # Copy installation script to packages directory
+          cp scripts/install_packages_standalone.sh apt-packages/install_packages.sh
+
+          cd apt-packages
+          tar -czf ../${{ env.PACKAGE_FILE }} *.deb install_packages.sh
+          cd ..
+
+          echo ""
+          echo "Archive created: ${{ env.PACKAGE_FILE }}"
+          echo "Size: $(du -h ${{ env.PACKAGE_FILE }} | cut -f1)"
+          echo "Contains: $(ls -1 apt-packages/*.deb | wc -l) packages + installation script"
+
+      - name: Display package information
+        run: |
+          echo ""
+          echo "========================================"
+          echo "Package Archive Information"
+          echo "========================================"
+          echo "File: ${{ env.PACKAGE_FILE }}"
+          echo "Size: $(du -h ${{ env.PACKAGE_FILE }} | cut -f1)"
+          echo "Packages: $(ls -1 apt-packages/*.deb 2>/dev/null | wc -l)"
+          echo "Manifest: ${{ env.MANIFEST_FILE }}"
+          echo ""
+          cat ${{ env.MANIFEST_FILE }}
+          echo "========================================"
+
+      - name: Install FTP client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lftp
+
+      - name: Upload to FTP server
+        env:
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+        run: |
+          # Determine remote path
+          if [ "${{ inputs.ftp_create_subdir }}" = "true" ]; then
+              REMOTE_PATH="${{ inputs.ftp_remote_path }}/${{ env.TIMESTAMP }}"
+          else
+              REMOTE_PATH="${{ inputs.ftp_remote_path }}"
+          fi
+
+          echo "Uploading to: ${FTP_USERNAME}@${FTP_SERVER}:$REMOTE_PATH"
+
+          # Upload with retry logic
+          ATTEMPT=1
+          MAX_ATTEMPTS=${{ inputs.max_retries }}
+
+          while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
+              echo "Upload attempt $ATTEMPT of $MAX_ATTEMPTS..."
+
+              if lftp -c "
+                  set ftp:ssl-allow no;
+                  set ftp:passive-mode on;
+                  set net:timeout 30;
+                  set net:max-retries 3;
+                  set net:reconnect-interval-base 5;
+                  open -u ${FTP_USERNAME},\${FTP_PASSWORD} ${FTP_SERVER}:${{ inputs.ftp_port }};
+                  mkdir -p $REMOTE_PATH;
+                  cd $REMOTE_PATH;
+                  put ${{ env.PACKAGE_FILE }};
+                  put ${{ env.MANIFEST_FILE }};
+                  put scripts/install_packages.sh -o ${{ inputs.install_script_path }};
+                  bye
+              "; then
+                  echo "Upload successful!"
+                  break
+              else
+                  echo "Upload failed (attempt $ATTEMPT)"
+                  if [ $ATTEMPT -lt $MAX_ATTEMPTS ]; then
+                      echo "Retrying in 10 seconds..."
+                      sleep 10
+                  fi
+              fi
+              ATTEMPT=$((ATTEMPT + 1))
+          done
+
+          if [ $ATTEMPT -gt $MAX_ATTEMPTS ]; then
+              echo "Error: Failed to upload after $MAX_ATTEMPTS attempts"
+              exit 1
+          fi
+
+      - name: Upload artifact to GitHub
+        uses: actions/upload-artifact@v4
+        with:
+          name: apt-packages-archive-${{ env.TIMESTAMP }}
+          path: |
+            ${{ env.PACKAGE_FILE }}
+            ${{ env.MANIFEST_FILE }}
+            scripts/install_packages.sh
+          retention-days: 90
+          compression-level: 9
+
+      - name: Generate summary
+        run: |
+          echo "## Package Extraction Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Archive**: ${{ env.PACKAGE_FILE }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Size**: $(du -h ${{ env.PACKAGE_FILE }} | cut -f1)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Packages**: $(ls -1 apt-packages/*.deb 2>/dev/null | wc -l)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Manifest**: Attached as artifact" >> $GITHUB_STEP_SUMMARY
+          echo "- **FTP Location**: ${{ secrets.FTP_SERVER }}${{ inputs.ftp_remote_path }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Server Installation" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "# Download and extract" >> $GITHUB_STEP_SUMMARY
+          echo "wget ftp://${{ secrets.FTP_SERVER }}${{ inputs.ftp_remote_path }}${{ env.PACKAGE_FILE }}" >> $GITHUB_STEP_SUMMARY
+          echo "tar -xzf ${{ env.PACKAGE_FILE }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# Install (script included in archive)" >> $GITHUB_STEP_SUMMARY
+          echo "./install_packages.sh" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker rmi apt-extractor || true
+          rm -rf apt-packages scripts Dockerfile.extract download_packages.sh
