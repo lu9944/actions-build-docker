@@ -6,7 +6,7 @@ on:
       base_image:
         description: 'Base Docker image (must match target system architecture)'
         required: false
-        default: 'ubuntu:22.04'
+        default: 'pytorch/pytorch:2.9.0-cuda12.6-cudnn9-devel'
 
       dockerfile_path:
         description: 'Path to Dockerfile to auto-extract APT packages from (optional, overrides apt_packages if set)'
@@ -17,6 +17,11 @@ on:
         description: 'APT packages to extract (space-separated, will include all dependencies). Ignored if dockerfile_path is set.'
         required: false
         default: 'build-essential iputils-ping net-tools iproute2 curl dnsutils tcpdump netcat-openbsd vim sudo unzip zip screen libgl1-mesa-glx htop git openssh-server libsm6 libxext6 ninja-build libglib2.0-0 libxrender-dev gcc g++ make cmake file wget'
+
+      pip_packages:
+        description: 'pip packages to extract (space-separated, will include all dependencies)'
+        required: false
+        default: 'jupyter jupyterlab'
 
       include_recommends:
         description: 'Include recommended packages'
@@ -78,7 +83,7 @@ jobs:
               exit 1
           fi
 
-          # Extract packages from apt install / apt-get install commands
+          # Extract APT packages from apt install / apt-get install commands
           # Handles multi-line commands with backslashes
           PARSED_PACKAGES=$(
               cat "${{ inputs.dockerfile_path }}" | \
@@ -106,22 +111,19 @@ jobs:
               tr '\n' ' '
           )
 
-          if [ -z "$PARSED_PACKAGES" ]; then
-              echo "Warning: No packages found in Dockerfile"
-              echo "Showing Dockerfile content for debugging:"
-              cat "${{ inputs.dockerfile_path }}"
-              exit 1
-          fi
-
-          echo "Packages found: $PARSED_PACKAGES"
-          echo "EXTRACTED_PACKAGES=$PARSED_PACKAGES" >> $GITHUB_ENV
-          echo "PACKAGE_COUNT=$(echo $PARSED_PACKAGES | wc -w)" >> $GITHUB_ENV
-
           echo ""
-          echo "=== Extracted Packages ==="
-          echo "$PARSED_PACKAGES" | tr ' ' '\n' | nl
-          echo "==========================="
-          echo "Total: $(echo $PARSED_PACKAGES | wc -w) packages"
+          echo "=== Extracted APT Packages ==="
+          if [ -n "$PARSED_PACKAGES" ]; then
+              echo "$PARSED_PACKAGES" | tr ' ' '\n' | nl
+              echo "Total: $(echo $PARSED_PACKAGES | wc -w) packages"
+              echo "EXTRACTED_PACKAGES=$PARSED_PACKAGES" >> $GITHUB_ENV
+              echo "PACKAGE_COUNT=$(echo $PARSED_PACKAGES | wc -w)" >> $GITHUB_ENV
+          else
+              echo "No APT packages found"
+              echo "EXTRACTED_PACKAGES=" >> $GITHUB_ENV
+              echo "PACKAGE_COUNT=0" >> $GITHUB_ENV
+          fi
+          echo "============================="
 
       - name: Create working directories
         run: |
@@ -130,15 +132,20 @@ jobs:
 
       - name: Display configuration
         run: |
-          echo "=== APT Package Extraction Configuration ==="
+          echo "=== Package Extraction Configuration ==="
           echo "Base Image: ${{ inputs.base_image }}"
           if [ -n "${{ inputs.dockerfile_path }}" ]; then
               echo "Dockerfile: ${{ inputs.dockerfile_path }}"
-              echo "Packages (extracted): ${{ env.EXTRACTED_PACKAGES }}"
-              echo "Package Count: ${{ env.PACKAGE_COUNT }}"
+              echo ""
+              echo "APT Packages (from Dockerfile): ${{ env.EXTRACTED_PACKAGES }}"
+              echo "APT Package Count: ${{ env.PACKAGE_COUNT }}"
           else
-              echo "Packages (manual): ${{ inputs.apt_packages }}"
+              echo ""
+              echo "APT Packages (manual): ${{ inputs.apt_packages }}"
           fi
+          echo ""
+          echo "pip Packages: ${{ inputs.pip_packages }}"
+          echo ""
           echo "Include Recommends: ${{ inputs.include_recommends }}"
           echo "FTP Server: ${{ secrets.FTP_SERVER }}:${{ inputs.ftp_port }}"
           echo "FTP Username: ${{ secrets.FTP_USERNAME }}"
@@ -164,7 +171,9 @@ jobs:
                   apt-rdepends \
                   dpkg-dev \
                   apt-utils \
-                  curl && \
+                  curl \
+                  python3 \
+                  python3-pip && \
               rm -rf /var/lib/apt/lists/* && \
               # Add Ubuntu repositories (PyTorch images only have CUDA repos)
               echo "deb http://archive.ubuntu.com/ubuntu/ $VERSION_CODENAME main restricted universe multiverse" > /etc/apt/sources.list.d/ubuntu.list && \
@@ -180,6 +189,7 @@ jobs:
               rm -rf /var/lib/apt/lists/*
 
           RUN mkdir -p /packages && \
+              mkdir -p /pip-packages && \
               mkdir -p /scripts
 
           COPY download_packages.sh /tmp/download_packages.sh
@@ -191,8 +201,12 @@ jobs:
           ARG APT_PACKAGES=""
           ENV APT_PACKAGES="${APT_PACKAGES}"
 
+          ARG PIP_PACKAGES=""
+          ENV PIP_PACKAGES="${PIP_PACKAGES}"
+
           RUN echo "=== Starting package download ===" && \
               echo "DEBUG: APT_PACKAGES='${APT_PACKAGES}'" && \
+              echo "DEBUG: PIP_PACKAGES='${PIP_PACKAGES}'" && \
               echo "DEBUG: INCLUDE_RECOMMENDS=${INCLUDE_RECOMMENDS}" && \
               /tmp/download_packages.sh && \
               echo "=== Package download completed ===" && \
@@ -200,8 +214,16 @@ jobs:
               ls -lh /packages/*.deb 2>/dev/null | head -20 && \
               DEB_COUNT=$(ls -1 /packages/*.deb 2>/dev/null | wc -l) && \
               echo "=== Total .deb files: $DEB_COUNT ===" && \
-              if [ "$DEB_COUNT" -eq 0 ]; then \
+              if [ -n "$APT_PACKAGES" ] && [ "$DEB_COUNT" -eq 0 ]; then \
                   echo "ERROR: No .deb files were downloaded!"; \
+                  exit 1; \
+              fi && \
+              echo "=== Listing downloaded pip packages ===" && \
+              ls -lh /pip-packages/*.whl /pip-packages/*.tar.gz 2>/dev/null | head -20 || true && \
+              PIP_COUNT=$(ls -1 /pip-packages/*.whl /pip-packages/*.tar.gz 2>/dev/null | wc -l) && \
+              echo "=== Total pip files: $PIP_COUNT ===" && \
+              if [ -n "$PIP_PACKAGES" ] && [ "$PIP_COUNT" -eq 0 ]; then \
+                  echo "ERROR: No pip packages were downloaded!"; \
                   exit 1; \
               fi
 
@@ -301,13 +323,14 @@ jobs:
           # Generate package manifest with versions
           echo "Generating package manifest..."
           {
-              echo "APT Package Manifest"
+              echo "Package Manifest"
               echo "Generated: $(date -u +"%Y-%m-%d %H:%M:%S UTC")"
               echo "Base Image: ${BASE_IMAGE:-unknown}"
-              echo "Requested Packages: $APT_PACKAGES"
+              echo "Requested APT Packages: $APT_PACKAGES"
               echo "Include Recommends: $INCLUDE_RECOMMENDS"
+              echo "Requested pip Packages: $PIP_PACKAGES"
               echo ""
-              echo "Package List:"
+              echo "APT Package List:"
               echo "========================================"
               for deb in *.deb; do
                   if [ -f "$deb" ]; then
@@ -321,14 +344,80 @@ jobs:
 
           # List all downloaded packages
           echo ""
-          echo "Downloaded packages:"
+          echo "Downloaded APT packages:"
           ls -lh /packages/*.deb 2>/dev/null | head -20
           if [ $(ls -1 /packages/*.deb 2>/dev/null | wc -l) -gt 20 ]; then
               echo "... and $(($(ls -1 /packages/*.deb 2>/dev/null | wc -l) - 20)) more files"
           fi
 
           echo ""
-          echo "=== Package extraction completed successfully ==="
+          echo "=== APT package extraction completed successfully ==="
+
+          # Handle pip packages if specified
+          if [ -n "$PIP_PACKAGES" ]; then
+              echo ""
+              echo "========================================"
+              echo "pip Package Extraction"
+              echo "========================================"
+              echo "Packages to extract: $PIP_PACKAGES"
+              echo "========================================"
+              echo ""
+
+              cd /pip-packages
+
+              echo "Downloading pip packages and dependencies..."
+              pip3 download --dest /pip-packages $PIP_PACKAGES 2>&1 | tee /tmp/pip-output.log
+              PIP_EXIT_CODE=${PIPESTATUS[0]}
+
+              echo ""
+              if [ $PIP_EXIT_CODE -eq 0 ]; then
+                  echo "✓ pip package download completed successfully"
+              else
+                  echo "⚠ pip download exited with code $PIP_EXIT_CODE (continuing with downloaded packages)"
+              fi
+
+              PIP_COUNT=$(ls -1 *.whl *.tar.gz 2>/dev/null | wc -l)
+              echo ""
+              echo "=== pip Download Summary ==="
+              echo "Total files: $PIP_COUNT"
+              echo "Total size: $(du -sh . | cut -f1)"
+              echo "============================"
+
+              if [ "$PIP_COUNT" -eq 0 ]; then
+                  echo ""
+                  echo "ERROR: No pip packages were downloaded!"
+                  echo ""
+                  echo "pip output log:"
+                  cat /tmp/pip-output.log
+                  exit 1
+              fi
+
+              # Append pip packages to manifest
+              echo ""
+              echo "pip Package List:"
+              echo "========================================" >> /scripts/package_manifest.txt
+              for pkg in *.whl *.tar.gz; do
+                  if [ -f "$pkg" ]; then
+                      size=$(du -h "$pkg" | cut -f1)
+                      echo "$pkg | $size" >> /scripts/package_manifest.txt
+                  fi
+              done
+
+              echo ""
+              echo "Downloaded pip packages:"
+              ls -lh /pip-packages/*.whl /pip-packages/*.tar.gz 2>/dev/null | head -20
+              if [ $PIP_COUNT -gt 20 ]; then
+                  echo "... and $(($PIP_COUNT - 20)) more files"
+              fi
+
+              echo ""
+              echo "=== pip package extraction completed successfully ==="
+          else
+              echo "No pip packages specified, skipping pip download"
+          fi
+
+          echo ""
+          echo "=== All package extraction completed successfully ==="
           exit 0
           SCRIPT_EOF
           chmod +x download_packages.sh
@@ -338,11 +427,13 @@ jobs:
           BASE_IMAGE: ${{ inputs.base_image }}
           INCLUDE_RECOMMENDS: ${{ inputs.include_recommends }}
           APT_PACKAGES: ${{ inputs.dockerfile_path != '' && env.EXTRACTED_PACKAGES || inputs.apt_packages }}
+          PIP_PACKAGES: ${{ inputs.pip_packages }}
         run: |
           docker build \
               --build-arg BASE_IMAGE="$BASE_IMAGE" \
               --build-arg INCLUDE_RECOMMENDS="$INCLUDE_RECOMMENDS" \
               --build-arg APT_PACKAGES="$APT_PACKAGES" \
+              --build-arg PIP_PACKAGES="$PIP_PACKAGES" \
               -f Dockerfile.extract \
               -t apt-extractor .
 
@@ -368,8 +459,9 @@ jobs:
           echo ""
           echo "Copying packages from container..."
 
-          # Ensure target directory exists
+          # Ensure target directories exist
           mkdir -p apt-packages
+          mkdir -p pip-packages
           mkdir -p scripts
 
           echo "Copying /packages from container..."
@@ -379,6 +471,9 @@ jobs:
               docker ps -a --filter "name=apt-extractor-container"
               exit 1
           }
+
+          echo "Copying /pip-packages from container..."
+          docker cp apt-extractor-container:/pip-packages/. ./pip-packages/ 2>/dev/null || echo "No pip packages found"
 
           echo "Copying /scripts/package_manifest.txt from container..."
           docker cp apt-extractor-container:/scripts/package_manifest.txt ./scripts/ 2>/dev/null || echo "Warning: No manifest file found"
@@ -393,7 +488,7 @@ jobs:
           fi
 
           echo ""
-          echo "Downloaded packages:"
+          echo "Downloaded APT packages:"
           ls -lh apt-packages/*.deb 2>/dev/null | head -20 || echo "No .deb files found in apt-packages/"
 
           TOTAL_DEBS=$(ls -1 apt-packages/*.deb 2>/dev/null | wc -l)
@@ -402,15 +497,28 @@ jobs:
           fi
 
           echo ""
-          echo "Total package count: $TOTAL_DEBS"
+          echo "Total APT package count: $TOTAL_DEBS"
 
-          # Fail if no packages were downloaded
-          if [ "$TOTAL_DEBS" -eq 0 ]; then
+          echo ""
+          echo "Downloaded pip packages:"
+          ls -lh pip-packages/*.whl pip-packages/*.tar.gz 2>/dev/null | head -20 || echo "No pip files found in pip-packages/"
+
+          TOTAL_PIP=$(ls -1 pip-packages/*.whl pip-packages/*.tar.gz 2>/dev/null | wc -l)
+          if [ "$TOTAL_PIP" -gt 20 ]; then
+              echo "... and $(($TOTAL_PIP - 20)) more files"
+          fi
+
+          echo ""
+          echo "Total pip package count: $TOTAL_PIP"
+
+          # Check if at least one type of package was downloaded
+          if [ "$TOTAL_DEBS" -eq 0 ] && [ "$TOTAL_PIP" -eq 0 ]; then
               echo ""
-              echo "ERROR: No .deb files were downloaded!"
+              echo "ERROR: No packages were downloaded!"
               echo ""
               echo "Checking container files..."
-              docker run --rm apt-extractor ls -la /packages 2>/dev/null || echo "Could not list container files"
+              docker run --rm apt-extractor ls -la /packages 2>/dev/null || echo "Could not list container APT files"
+              docker run --rm apt-extractor ls -la /pip-packages 2>/dev/null || echo "Could not list container pip files"
               echo ""
               echo "Package manifest contents:"
               cat scripts/package_manifest.txt 2>/dev/null || echo "No manifest file found"
@@ -478,10 +586,12 @@ jobs:
           #!/bin/bash
           set -e
 
-          # This script must be in the same directory as the .deb files
+          # This script must be in the same directory as the .deb and pip files
           # Extract the tar.gz first, then run this script
 
-          echo "Installing APT packages..."
+          echo "========================================"
+          echo "Offline Package Installation Script"
+          echo "========================================"
 
           if [ "$EUID" -ne 0 ]; then
               echo "This script requires root privileges. Restarting with sudo..."
@@ -492,21 +602,53 @@ jobs:
           cd "$SCRIPT_DIR"
 
           DEB_COUNT=$(ls -1 *.deb 2>/dev/null | wc -l)
-
-          if [ "$DEB_COUNT" -eq 0 ]; then
-              echo "Error: No .deb files found in current directory"
-              echo "Please extract the tar.gz archive first."
-              exit 1
-          fi
-
-          echo "Found $DEB_COUNT package files"
-          echo "Installing..."
-
-          dpkg -i *.deb || true
-          apt-get install -f -y
+          PIP_COUNT=$(ls -1 *.whl *.tar.gz 2>/dev/null | wc -l)
 
           echo ""
-          echo "Installation completed!"
+          echo "Found packages:"
+          echo "  - APT packages: $DEB_COUNT"
+          echo "  - pip packages: $PIP_COUNT"
+          echo ""
+
+          # Install APT packages
+          if [ "$DEB_COUNT" -gt 0 ]; then
+              echo "=== Installing APT packages ==="
+              dpkg -i *.deb || true
+              echo ""
+              echo "Fixing broken dependencies..."
+              apt-get install -f -y
+              echo "✓ APT packages installed"
+              echo ""
+          fi
+
+          # Install pip packages
+          if [ "$PIP_COUNT" -gt 0 ]; then
+              echo "=== Installing pip packages ==="
+
+              # Check if pip3 is available
+              if ! command -v pip3 &> /dev/null; then
+                  echo "Error: pip3 is not installed. Please install python3-pip first."
+                  echo "You can install it with: apt-get install -y python3-pip"
+                  exit 1
+              fi
+
+              echo "Installing pip packages..."
+              pip3 install --no-index --find-links=. *.whl *.tar.gz 2>/dev/null || \
+              pip3 install --no-index --find-links=. *.whl 2>/dev/null || \
+              pip3 install --no-index --find-links=. *.tar.gz
+
+              echo "✓ pip packages installed"
+              echo ""
+          fi
+
+          # Clean up
+          echo "=== Cleaning up ==="
+          rm -f *.deb *.whl *.tar.gz
+
+          echo ""
+          echo "========================================"
+          echo "Installation completed successfully!"
+          echo "========================================"
           STANDALONE_EOF
 
           chmod +x scripts/install_packages_standalone.sh
@@ -516,24 +658,36 @@ jobs:
           # Copy installation script to packages directory
           cp scripts/install_packages_standalone.sh apt-packages/install_packages.sh
 
+          # Copy pip packages to the same directory
+          if [ -d pip-packages ] && [ "$(ls -A pip-packages)" ]; then
+              cp pip-packages/*.whl pip-packages/*.tar.gz apt-packages/ 2>/dev/null || true
+          fi
+
           cd apt-packages
-          tar -czf ../${{ env.PACKAGE_FILE }} *.deb install_packages.sh
+          DEB_COUNT=$(ls -1 *.deb 2>/dev/null | wc -l)
+          PIP_COUNT=$(ls -1 *.whl *.tar.gz 2>/dev/null | wc -l)
+          tar -czf ../${{ env.PACKAGE_FILE }} *.deb *.whl *.tar.gz install_packages.sh
           cd ..
 
           echo ""
           echo "Archive created: ${{ env.PACKAGE_FILE }}"
           echo "Size: $(du -h ${{ env.PACKAGE_FILE }} | cut -f1)"
-          echo "Contains: $(ls -1 apt-packages/*.deb | wc -l) packages + installation script"
+          echo "Contains: $DEB_COUNT APT packages + $PIP_COUNT pip packages + installation script"
 
       - name: Display package information
         run: |
+          TOTAL_DEBS=$(ls -1 apt-packages/*.deb 2>/dev/null | wc -l)
+          TOTAL_PIP=$(ls -1 pip-packages/*.whl pip-packages/*.tar.gz 2>/dev/null | wc -l)
+
           echo ""
           echo "========================================"
           echo "Package Archive Information"
           echo "========================================"
           echo "File: ${{ env.PACKAGE_FILE }}"
           echo "Size: $(du -h ${{ env.PACKAGE_FILE }} | cut -f1)"
-          echo "Packages: $(ls -1 apt-packages/*.deb 2>/dev/null | wc -l)"
+          echo "APT Packages: $TOTAL_DEBS"
+          echo "pip Packages: $TOTAL_PIP"
+          echo "Total: $((TOTAL_DEBS + TOTAL_PIP)) packages"
           echo "Manifest: ${{ env.MANIFEST_FILE }}"
           echo ""
           cat ${{ env.MANIFEST_FILE }}
@@ -639,13 +793,18 @@ jobs:
 
       - name: Generate summary
         run: |
+          TOTAL_DEBS=$(ls -1 apt-packages/*.deb 2>/dev/null | wc -l)
+          TOTAL_PIP=$(ls -1 pip-packages/*.whl pip-packages/*.tar.gz 2>/dev/null | wc -l)
+
           echo "========================================" >> $GITHUB_STEP_SUMMARY
-          echo "✅ APT 包提取完成!" >> $GITHUB_STEP_SUMMARY
+          echo "✅ 包提取完成!" >> $GITHUB_STEP_SUMMARY
           echo "========================================" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- **压缩包**: ${{ env.PACKAGE_FILE }}" >> $GITHUB_STEP_SUMMARY
           echo "- **文件大小**: $(du -h ${{ env.PACKAGE_FILE }} | cut -f1)" >> $GITHUB_STEP_SUMMARY
-          echo "- **包数量**: $(ls -1 apt-packages/*.deb 2>/dev/null | wc -l)" >> $GITHUB_STEP_SUMMARY
+          echo "- **APT 包数量**: $TOTAL_DEBS" >> $GITHUB_STEP_SUMMARY
+          echo "- **pip 包数量**: $TOTAL_PIP" >> $GITHUB_STEP_SUMMARY
+          echo "- **总包数量**: $((TOTAL_DEBS + TOTAL_PIP))" >> $GITHUB_STEP_SUMMARY
           echo "- **清单文件**: ${{ env.MANIFEST_FILE }}" >> $GITHUB_STEP_SUMMARY
           echo "- **FTP 位置**: ftp://${{ secrets.FTP_SERVER }}${{ inputs.ftp_remote_path }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -664,4 +823,4 @@ jobs:
         if: always()
         run: |
           docker rmi apt-extractor || true
-          rm -rf apt-packages scripts Dockerfile.extract download_packages.sh
+          rm -rf apt-packages pip-packages scripts Dockerfile.extract download_packages.sh
