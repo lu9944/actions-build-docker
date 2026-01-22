@@ -223,8 +223,6 @@ jobs:
               exit 1
           fi
 
-          echo "INFO: Packages to extract: $APT_PACKAGES"
-
           echo "========================================"
           echo "APT Package Extraction Script"
           echo "========================================"
@@ -237,77 +235,59 @@ jobs:
           echo "Updating package lists..."
           apt-get update
 
-          # Install apt-rdepends if not available
-          if ! command -v apt-rdepends &> /dev/null; then
-              echo "Installing apt-rdepends..."
-              apt-get install -y apt-rdepends dpkg-dev
+          # Build apt-get install options
+          INSTALL_OPTS=""
+          if [ "$INCLUDE_RECOMMENDS" != "true" ]; then
+              INSTALL_OPTS="--no-install-recommends"
           fi
 
-          # Get complete dependency tree
-          echo "Resolving dependencies..."
-          echo "Running apt-rdepends on: $APT_PACKAGES"
+          # Create a temporary directory for cache
+          mkdir -p /tmp/apt-cache
 
-          # Test apt-rdepends on first package
-          FIRST_PKG=$(echo "$APT_PACKAGES" | awk '{print $1}')
-          echo "Testing apt-rdepends on first package: $FIRST_PKG"
-          echo "=== apt-rdepends output for $FIRST_PKG (raw) ==="
-          apt-rdepends "$FIRST_PKG" 2>&1 | head -50
-          echo "======================================="
+          # Configure apt to use our cache directory
+          echo "Dir::Cache::Archives /tmp/apt-cache;" > /etc/apt/apt.conf.d/99cache
+          echo "Dir::State::Lists /var/lib/apt/lists;" >> /etc/apt/apt.conf.d/99cache
+          echo "Dir::Cache /tmp/apt-cache;" >> /etc/apt/apt.conf.d/99cache
+          echo "Acquire::Languages \"none\";" >> /etc/apt/apt.conf.d/99cache
 
-          # Try multiple methods to get package list
-          echo "=== Method 1: apt-rdepends with --print-state ==="
-          if [ "$INCLUDE_RECOMMENDS" = "true" ]; then
-              METHOD1_OUTPUT=$(apt-rdepends --print-state --follow=ALL \
-                  $(echo "$APT_PACKAGES") 2>&1 || true)
+          echo "=== Downloading packages with dependencies ==="
+          echo "Running: apt-get install --download-only --reinstall $INSTALL_OPTS -y $APT_PACKAGES"
+
+          # Download packages and dependencies using apt-get
+          # This downloads to /var/cache/apt/archives/ by default
+          if apt-get install --download-only --reinstall $INSTALL_OPTS -y $APT_PACKAGES; then
+              echo "✓ Package download completed successfully"
           else
-              METHOD1_OUTPUT=$(apt-rdepends --print-state --follow=ALL --no-recommends \
-                  $(echo "$APT_PACKAGES") 2>&1 || true)
-          fi
-          echo "$METHOD1_OUTPUT" | head -30
-          ALL_PACKAGES=$(echo "$METHOD1_OUTPUT" | grep -E "^Package:" | cut -d' ' -f2 | sort -u)
-          echo "Method 1 found $(echo $ALL_PACKAGES | wc -w) packages"
-
-          # If method 1 fails, try method 2 (without --print-state)
-          if [ -z "$ALL_PACKAGES" ]; then
-              echo "=== Method 2: apt-rdepends without --print-state ==="
-              if [ "$INCLUDE_RECOMMENDS" = "true" ]; then
-                  METHOD2_OUTPUT=$(apt-rdepends --follow=ALL \
-                      $(echo "$APT_PACKAGES") 2>&1 || true)
-              else
-                  METHOD2_OUTPUT=$(apt-rdepends --follow=ALL --no-recommends \
-                      $(echo "$APT_PACKAGES") 2>&1 || true)
-              fi
-              echo "$METHOD2_OUTPUT" | head -30
-              # Extract package names from apt-rdepends output (lines without dependencies)
-              ALL_PACKAGES=$(echo "$METHOD2_OUTPUT" | grep -vE " |Depends:|Recommends:|Suggests:|PreDepends:" | sort -u)
-              echo "Method 2 found $(echo $ALL_PACKAGES | wc -w) packages"
+              echo "✗ Some packages failed to download, continuing with what we have..."
           fi
 
-          echo "Final ALL_PACKAGES count: $(echo $ALL_PACKAGES | wc -w)"
-          echo "Package list content (first 20): $(echo $ALL_PACKAGES | tr ' ' '\n' | head -20 | tr '\n' ' ')"
+          # Move downloaded packages to /packages
+          echo ""
+          echo "Moving packages to /packages..."
+          if [ -d /var/cache/apt/archives ]; then
+              # Move only .deb files, skipping partial and lock files
+              mv -f /var/cache/apt/archives/*.deb /packages/ 2>/dev/null || true
+          fi
 
-          # Filter out virtual packages
-          echo "Filtering out virtual packages..."
-          REAL_PACKAGES=""
-          FILTERED_COUNT=0
-          for pkg in $ALL_PACKAGES; do
-              if apt-cache show "$pkg" &>/dev/null; then
-                  REAL_PACKAGES="$REAL_PACKAGES $pkg"
-              else
-                  FILTERED_COUNT=$((FILTERED_COUNT + 1))
-              fi
-          done
+          # Also check our cache directory
+          if [ -d /tmp/apt-cache/archives ]; then
+              mv -f /tmp/apt-cache/archives/*.deb /packages/ 2>/dev/null || true
+          fi
 
-          echo "Filtered out $FILTERED_COUNT virtual/unavailable packages"
-          echo "Total real packages to download: $(echo $REAL_PACKAGES | wc -w)"
+          cd /packages
 
-          # Fail if no packages were found
-          if [ -z "$REAL_PACKAGES" ]; then
+          DEB_COUNT=$(ls -1 *.deb 2>/dev/null | wc -l)
+          echo ""
+          echo "=== Download Summary ==="
+          echo "Total .deb files: $DEB_COUNT"
+          echo "Total size: $(du -sh . | cut -f1)"
+          echo "========================="
+
+          if [ "$DEB_COUNT" -eq 0 ]; then
               echo ""
-              echo "ERROR: No real packages found!"
-              echo "The requested packages may not be available in this base image's repositories."
+              echo "ERROR: No .deb files were downloaded!"
               echo ""
-              echo "Checking first few requested packages:"
+              echo "Checking package availability:"
               for pkg in $(echo "$APT_PACKAGES" | tr ' ' '\n' | head -5); do
                   if apt-cache show "$pkg" &>/dev/null; then
                       echo "  ✓ $pkg - AVAILABLE"
@@ -317,33 +297,6 @@ jobs:
               done
               exit 1
           fi
-
-          echo "First 10 packages: $(echo $REAL_PACKAGES | tr ' ' '\n' | head -10)"
-          echo
-
-          # Download all .deb files
-          cd /packages
-          DOWNLOADED=0
-          FAILED=0
-
-          for pkg in $REAL_PACKAGES; do
-              if apt-get download "$pkg" 2>/dev/null; then
-                  DOWNLOADED=$((DOWNLOADED + 1))
-              else
-                  echo "Warning: Failed to download $pkg"
-                  FAILED=$((FAILED + 1))
-              fi
-          done
-
-          echo
-          echo "========================================"
-          echo "Download Summary"
-          echo "========================================"
-          echo "Successfully downloaded: $DOWNLOADED packages"
-          echo "Failed downloads: $FAILED packages"
-          echo "Total .deb files: $(ls -1 *.deb 2>/dev/null | wc -l)"
-          echo "Total size: $(du -sh . | cut -f1)"
-          echo "========================================"
 
           # Generate package manifest with versions
           echo "Generating package manifest..."
@@ -367,10 +320,15 @@ jobs:
           } > /scripts/package_manifest.txt
 
           # List all downloaded packages
+          echo ""
+          echo "Downloaded packages:"
           ls -lh /packages/*.deb 2>/dev/null | head -20
           if [ $(ls -1 /packages/*.deb 2>/dev/null | wc -l) -gt 20 ]; then
               echo "... and $(($(ls -1 /packages/*.deb 2>/dev/null | wc -l) - 20)) more files"
           fi
+
+          echo ""
+          echo "=== Package extraction completed successfully ==="
           SCRIPT_EOF
           chmod +x download_packages.sh
 
