@@ -87,20 +87,29 @@ jobs:
           ENV DEBIAN_FRONTEND=noninteractive
           ENV TZ=UTC
 
-          RUN apt-get update && \
+          # Install tools and set up Ubuntu repositories
+          RUN . /etc/os-release && \
+              echo "=== System Info ===" && \
+              echo "OS: $ID $VERSION_ID $VERSION_CODENAME" && \
+              echo "===================" && \
+              apt-get update && \
               apt-get install -y --no-install-recommends \
                   apt-rdepends \
                   dpkg-dev \
-                  apt-utils && \
+                  apt-utils \
+                  curl && \
               rm -rf /var/lib/apt/lists/* && \
-              # Ensure we have full Ubuntu repositories (not just CUDA repos)
-              # Detect Ubuntu version and add standard repos if missing
-              . /etc/os-release && \
-              echo "Detected OS: $ID $VERSION_ID" && \
+              # Add Ubuntu repositories (PyTorch images only have CUDA repos)
+              echo "deb http://archive.ubuntu.com/ubuntu/ $VERSION_CODENAME main restricted universe multiverse" > /etc/apt/sources.list.d/ubuntu.list && \
+              echo "deb http://archive.ubuntu.com/ubuntu/ $VERSION_CODENAME-updates main restricted universe multiverse" >> /etc/apt/sources.list.d/ubuntu.list && \
+              echo "deb http://security.ubuntu.com/ubuntu/ $VERSION_CODENAME-security main restricted universe multiverse" >> /etc/apt/sources.list.d/ubuntu.list && \
+              echo "=== Added Ubuntu repositories for $VERSION_CODENAME ===" && \
+              cat /etc/apt/sources.list.d/ubuntu.list && \
               apt-get update && \
-              (grep -q "http://archive.ubuntu.com/ubuntu/" /etc/apt/sources.list /etc/apt/sources.list.d/*.list 2>/dev/null || \
-               echo "deb http://archive.ubuntu.com/ubuntu/ $VERSION_CODENAME main restricted universe multiverse" > /etc/apt/sources.list.d/ubuntu.list) && \
-              apt-get update && \
+              # Verify we can find packages
+              echo "=== Verifying package availability ===" && \
+              apt-cache show build-essential > /dev/null && echo "✓ build-essential found" || echo "✗ build-essential NOT found" && \
+              apt-cache show curl > /dev/null && echo "✓ curl found" || echo "✗ curl NOT found" && \
               rm -rf /var/lib/apt/lists/*
 
           RUN mkdir -p /packages && \
@@ -121,8 +130,13 @@ jobs:
               /tmp/download_packages.sh && \
               echo "=== Package download completed ===" && \
               echo "=== Listing downloaded packages ===" && \
-              ls -lh /packages/*.deb 2>/dev/null | head -20 || echo "ERROR: No .deb files found!" && \
-              echo "=== Total .deb files: $(ls -1 /packages/*.deb 2>/dev/null | wc -l) ==="
+              ls -lh /packages/*.deb 2>/dev/null | head -20 && \
+              DEB_COUNT=$(ls -1 /packages/*.deb 2>/dev/null | wc -l) && \
+              echo "=== Total .deb files: $DEB_COUNT ===" && \
+              if [ "$DEB_COUNT" -eq 0 ]; then \
+                  echo "ERROR: No .deb files were downloaded!"; \
+                  exit 1; \
+              fi
 
           CMD ["/bin/bash"]
           EOF
@@ -192,6 +206,24 @@ jobs:
 
           echo "Filtered out $FILTERED_COUNT virtual/unavailable packages"
           echo "Total real packages to download: $(echo $REAL_PACKAGES | wc -w)"
+
+          # Fail if no packages were found
+          if [ -z "$REAL_PACKAGES" ]; then
+              echo ""
+              echo "ERROR: No real packages found!"
+              echo "The requested packages may not be available in this base image's repositories."
+              echo ""
+              echo "Checking first few requested packages:"
+              for pkg in $(echo "$APT_PACKAGES" | tr ' ' '\n' | head -5); do
+                  if apt-cache show "$pkg" &>/dev/null; then
+                      echo "  ✓ $pkg - AVAILABLE"
+                  else
+                      echo "  ✗ $pkg - NOT FOUND in repositories"
+                  fi
+              done
+              exit 1
+          fi
+
           echo "First 10 packages: $(echo $REAL_PACKAGES | tr ' ' '\n' | head -10)"
           echo
 
