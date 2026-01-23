@@ -57,7 +57,7 @@ RUN pip install mmdet==2.14.0 mmsegmentation==0.14.1
 RUN pip install einops fvcore seaborn iopath==0.1.9 timm==0.6.13 \
     typing-extensions==4.5.0 pylint ipython==7.34.0 \
     numpy==1.19.5 matplotlib==3.5.2 numba==0.48.0 \
-    pandas==1.4.4 scikit-image==0.19.3 setuptools==59.5.0 jupyter jupyterlab
+    pandas==1.3.5 scikit-image==0.19.3 setuptools==59.5.0 jupyter jupyterlab
 
 # 编译安装 MMDet3D v0.17.1 (此处强烈依赖 FORCE_CUDA=1)
 RUN git clone https://github.com/open-mmlab/mmdetection3d.git /tmp/mmdetection3d && \
