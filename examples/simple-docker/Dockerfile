@@ -23,6 +23,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     wget \
     curl \
+    wget \
+    openssh-server \
+    iputils-ping \
+    net-tools \
+    dnsutils \
+    tcpdump \
+    netcat-openbsd \
+    sudo \
+    unzip \
     vim \
     build-essential \
     libsparsehash-dev \
