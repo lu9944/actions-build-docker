@@ -55,7 +55,7 @@ RUN pip install mmdet==2.14.0 mmsegmentation==0.14.1
 
 # 安装基础依赖
 RUN pip install einops fvcore seaborn iopath==0.1.9 timm==0.6.13 \
-    typing-extensions==4.5.0 pylint ipython==8.12.0 \
+    typing-extensions==4.5.0 pylint ipython==7.34.0 \
     numpy==1.19.5 matplotlib==3.5.2 numba==0.48.0 \
     pandas==1.4.4 scikit-image==0.19.3 setuptools==59.5.0 jupyter jupyterlab
 
