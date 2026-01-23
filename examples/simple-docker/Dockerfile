@@ -8,10 +8,10 @@ RUN sed -i -e 's|http.*.ubuntu.com|http://mirrors.tuna.tsinghua.edu.cn|' /etc/ap
     rm -rf /var/lib/apt/lists/* && \
     pip3 install jupyter jupyterlab -i https://mirrors.aliyun.com/pypi/simple
 
-RUN bash -c "$(curl -fsSL https://gitee.com/RubyMetric/nvm-cn/raw/main/install.sh)"
-
-RUN nvm ls-remote
-RUN nvm install 22
-RUN npm install -g @anthropic-ai/claude-code
+RUN bash -c "$(curl -fsSL https://gitee.com/RubyMetric/nvm-cn/raw/main/install.sh)" && \
+    . ~/.nvm/nvm.sh && \
+    nvm install 22 && \
+    nvm use 22 && \
+    npm install -g @anthropic-ai/claude-code
 
 WORKDIR /usr/local/src
