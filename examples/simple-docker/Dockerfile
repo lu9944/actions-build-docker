@@ -14,4 +14,8 @@ RUN bash -c "$(curl -fsSL https://gitee.com/RubyMetric/nvm-cn/raw/main/install.s
     nvm use 22 && \
     npm install -g @anthropic-ai/claude-code
 
+# 配置 nvm 环境变量（使其在容器启动时可用）
+ENV NVM_DIR="/root/.nvm"
+ENV PATH="/root/.nvm/versions/node/v22/bin:${PATH}"
+
 WORKDIR /usr/local/src
