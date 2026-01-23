@@ -25,9 +25,11 @@ ENV LIBRARY_PATH=${CUDA_HOME}/lib64:${LIBRARY_PATH}
 # [关键修复 3] 修复 UndefinedVar 警告，去掉末尾的 :${CPATH}
 ENV CPATH=${CUDA_HOME}/include
 
-# 切换到 Ubuntu 20.04 归档源（标准支持已结束）
+# 切换到 Ubuntu 18.04 归档源（标准支持已结束）
 RUN sed -i 's|http://archive.ubuntu.com|http://old-releases.ubuntu.com|g' /etc/apt/sources.list && \
-    sed -i 's|http://security.ubuntu.com|http://old-releases.ubuntu.com|g' /etc/apt/sources.list
+    sed -i 's|http://security.ubuntu.com|http://old-releases.ubuntu.com|g' /etc/apt/sources.list && \
+    # 移除有问题的 NVIDIA 源（GPG 密钥已过期）
+    rm -f /etc/apt/sources.list.d/cuda.list /etc/apt/sources.list.d/nvidia-ml.list
 
 # 安装系统依赖
 RUN apt-get update && apt-get install -y --no-install-recommends \
