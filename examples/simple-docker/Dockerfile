@@ -64,6 +64,14 @@ RUN npm install -g opencode-ai
 
 RUN echo latest > ~/TEST_VERSION
 
+# 创建配置目录并写入 opencode 配置文件
+RUN mkdir -p /home/ubuntu/.config/opencode && \
+    cat <<EOF > /home/ubuntu/.config/opencode/opencode.json
+{
+  "key": "value"
+}
+EOF
+
 # confirm installation
 RUN node -v
 RUN npm -v
