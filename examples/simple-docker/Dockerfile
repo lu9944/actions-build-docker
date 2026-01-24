@@ -8,7 +8,7 @@ RUN set -eux \
     # 检查基础镜像系统信息
     && cat /etc/os-release \
     # 检查当前 apt 源配置
-    && cat /etc/apt/sources.list \
+    && cat /etc/apt/sources.list.d/debian.sources 2>/dev/null || cat /etc/apt/sources.list 2>/dev/null || true \
     # 更新包列表
     && apt update -y \
     # 安装所有系统依赖（一次性安装，避免依赖冲突）
