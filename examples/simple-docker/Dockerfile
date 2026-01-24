@@ -60,6 +60,7 @@ WORKDIR /usr/local/src
 
 # install pm2 globally
 RUN npm install -g pm2
+RUN npm install -g opencode
 
 RUN echo latest > ~/TEST_VERSION
 
