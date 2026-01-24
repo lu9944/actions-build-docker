@@ -9,10 +9,6 @@ RUN set -eux \
     && cat /etc/os-release \
     # 检查当前 apt 源配置
     && cat /etc/apt/sources.list \
-    # 配置 Ubuntu 22.04 (Jammy) 官方源
-    # && echo "deb http://archive.ubuntu.com/ubuntu/ jammy main restricted universe multiverse" > /etc/apt/sources.list \
-    # && echo "deb http://archive.ubuntu.com/ubuntu/ jammy-updates main restricted universe multiverse" >> /etc/apt/sources.list \
-    # && echo "deb http://archive.ubuntu.com/ubuntu/ jammy-security main restricted universe multiverse" >> /etc/apt/sources.list \
     # 更新包列表
     && apt update -y \
     # 安装所有系统依赖（一次性安装，避免依赖冲突）
@@ -23,7 +19,7 @@ RUN set -eux \
         iproute2 \
         curl \
         wget \
-        dnsutils \
+        bind9-dnsutils \
         tcpdump \
         netcat-openbsd \
         vim \
@@ -31,7 +27,7 @@ RUN set -eux \
         unzip \
         zip \
         screen \
-        libgl1-mesa-glx \
+        libgl1 \
         htop \
         git \
         openssh-server \
