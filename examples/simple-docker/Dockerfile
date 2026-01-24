@@ -1,33 +1,9 @@
-# set the base image to Debian
-# https://hub.docker.com/_/debian/
-FROM debian:latest
+# set the base image to Node.js
+# https://hub.docker.com/_/node/
+FROM node:22-slim
 
-# replace shell with bash so we can source files
-RUN rm /bin/sh && ln -s /bin/bash /bin/sh
-
-# update the repository sources list
-# and install dependencies
-RUN apt-get update \
-      && apt-get install -y --no-install-recommends curl wget \
-      && apt-get -y autoclean \
-      && rm -rf /var/lib/apt/lists/*
-
-# nvm environment variables
-ENV NVM_DIR=/root/.nvm
-ENV NODE_VERSION=22.22.0
-
-# install nvm and node
-# https://github.com/creationix/nvm#install-script
-RUN curl --silent -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash \
-    && source $NVM_DIR/nvm.sh \
-    && nvm install $NODE_VERSION \
-    && nvm alias default $NODE_VERSION \
-    && nvm use default \
-    && npm install -g pm2
-
-# add node and npm to path so the commands are available
-ENV NODE_PATH=$NVM_DIR/versions/node/v$NODE_VERSION/lib/node_modules
-ENV PATH=$NVM_DIR/versions/node/v$NODE_VERSION/bin:$PATH
+# install pm2 globally
+RUN npm install -g pm2
 
 RUN echo latest > ~/TEST_VERSION
 
