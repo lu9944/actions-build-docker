@@ -1,0 +1,535 @@
+name: Build OpenCode Ubuntu Image
+
+run-name: Build opencode image (${{ inputs.opencode_version }} / ubuntu-${{ inputs.ubuntu_version }})
+
+permissions:
+  contents: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      opencode_version:
+        description: 'opencode 版本（latest 或具体版本，如 2.0.29）'
+        required: false
+        default: 'latest'
+      ubuntu_version:
+        description: 'Ubuntu 基础镜像版本'
+        required: false
+        default: '24.04'
+        type: choice
+        options:
+          - '24.04'
+          - '22.04'
+          - '20.04'
+      variant:
+        description: 'CPU 平台变体（无 AVX2 的老 CPU 选 linux-x64-baseline；auto 由安装脚本自动识别）'
+        required: false
+        default: 'linux-x64'
+        type: choice
+        options:
+          - 'linux-x64'
+          - 'linux-x64-baseline'
+          - 'auto'
+      openchamber_version:
+        description: 'OpenChamber 版本（latest 或具体版本，如 2.3.2）'
+        required: false
+        default: 'latest'
+      image_name:
+        description: '本地构建的镜像名称和标签'
+        required: false
+        default: 'opencode-ubuntu:latest'
+      enable_dockerhub_push:
+        description: '推送到 Docker Hub（需要 DOCKERHUB_USERNAME / DOCKERHUB_TOKEN）'
+        required: false
+        default: true
+        type: boolean
+      dockerhub_image_name:
+        description: 'Docker Hub 目标镜像名（如 username/opencode，可带 tag；留空则使用 <DOCKERHUB_USERNAME>/opencode，推送 :<版本> 和 :latest）'
+        required: false
+        default: ''
+      dockerhub_visibility:
+        description: 'Docker Hub 仓库可见性（推送时尝试设置）'
+        required: false
+        default: 'public'
+        type: choice
+        options:
+          - 'public'
+          - 'private'
+      skip_tar_export:
+        description: '跳过 TAR 导出（不需要离线 tar 文件时保持勾选）'
+        required: false
+        default: true
+        type: boolean
+      enable_release:
+        description: '上传 TAR 到 GitHub Release（需要先取消跳过 TAR 导出）'
+        required: false
+        default: false
+        type: boolean
+      enable_ftp:
+        description: '上传 TAR 到 FTP（需要先取消跳过 TAR 导出）'
+        required: false
+        default: false
+        type: boolean
+      ftp_port:
+        description: 'FTP 端口（默认：21）'
+        required: false
+        default: '21'
+      ftp_path:
+        description: 'FTP 目标路径（例如：/docker-images/）'
+        required: false
+        default: '/'
+
+jobs:
+  build-image:
+    name: Build opencode ubuntu image
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Display Build Configuration
+        run: |
+          echo "=========================================="
+          echo "OpenCode Ubuntu 镜像构建"
+          echo "=========================================="
+          echo "opencode 版本: ${{ inputs.opencode_version }}"
+          echo "Ubuntu 版本:   ${{ inputs.ubuntu_version }}"
+          echo "CPU 变体:      ${{ inputs.variant }}"
+          echo "OpenChamber:   ${{ inputs.openchamber_version }}"
+          echo "镜像名称:      ${{ inputs.image_name }}"
+          echo "=========================================="
+
+      - name: Resolve and Download OpenCode Offline Package
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION_INPUT: ${{ inputs.opencode_version }}
+          VARIANT: ${{ inputs.variant }}
+        run: |
+          set -euo pipefail
+          UPSTREAM="lu9944/offline-opencode-installer"
+
+          # ---------- 1) 定位 Release（latest 或 指定版本） ----------
+          if [ "$VERSION_INPUT" = "latest" ]; then
+            API_URL="https://api.github.com/repos/${UPSTREAM}/releases/latest"
+          else
+            VER="${VERSION_INPUT#v}"
+            API_URL="https://api.github.com/repos/${UPSTREAM}/releases/tags/offline-${VER}"
+          fi
+          echo "查询 Release: $API_URL"
+
+          if ! RELEASE_JSON="$(curl -fsSL \
+                -H "Accept: application/vnd.github+json" \
+                -H "Authorization: Bearer ${GH_TOKEN}" "$API_URL")"; then
+            echo "❌ 无法获取 Release，请检查版本 '$VERSION_INPUT' 是否存在"
+            exit 1
+          fi
+
+          TAG="$(jq -r '.tag_name' <<< "$RELEASE_JSON")"
+          RESOLVED_VERSION="${TAG#offline-}"
+          echo "✅ 使用 opencode 版本: $RESOLVED_VERSION（tag: $TAG）"
+          echo "OPENCODE_VERSION=${RESOLVED_VERSION}" >> "$GITHUB_ENV"
+
+          # ---------- 2) 选择 x86_64 平台的离线包 ----------
+          case "$VARIANT" in
+            linux-x64-baseline)
+              FILTER='([.assets[] | select(.name|endswith(".zip")) | select(.name|test("linux-x64-baseline")) | select(.name|test("musl")|not)] | first)'
+              ;;
+            auto)
+              FILTER='([.assets[] | select(.name|endswith(".zip")) | select(.name|test("linux-x64")) | select(.name|test("baseline|musl")|not)] | first)
+                      // ([.assets[] | select(.name|endswith(".zip")) | select(.name|test("linux-x64")) | select(.name|test("musl")|not)] | first)
+                      // ([.assets[] | select(.name|endswith(".zip")) | select(.name|test("linux-x64"))] | first)'
+              ;;
+            *)
+              FILTER='([.assets[] | select(.name|endswith(".zip")) | select(.name|test("linux-x64")) | select(.name|test("baseline|musl")|not)] | first)'
+              ;;
+          esac
+
+          ASSET="$(jq -c "$FILTER" <<< "$RELEASE_JSON")"
+          if [ "$ASSET" = "null" ] || [ -z "$ASSET" ]; then
+            echo "❌ Release 中没有匹配 '$VARIANT' 的 zip 离线包，可用文件:"
+            jq -r '.assets[].name' <<< "$RELEASE_JSON"
+            exit 1
+          fi
+          ASSET_NAME="$(jq -r '.name' <<< "$ASSET")"
+          ASSET_URL="$(jq -r '.browser_download_url' <<< "$ASSET")"
+          echo "✅ 离线包: $ASSET_NAME"
+
+          # ---------- 3) 下载 ----------
+          mkdir -p dist
+          echo "下载: $ASSET_URL"
+          curl -fL --retry 3 --retry-delay 5 -o "dist/${ASSET_NAME}" "$ASSET_URL"
+          ls -lh "dist/${ASSET_NAME}"
+
+          # ---------- 4) 外层 SHA256 校验（对照 Release 上的 SHA256SUMS） ----------
+          SUMS_URL="$(jq -r '[.assets[] | select(.name=="SHA256SUMS")] | first | .browser_download_url // empty' <<< "$RELEASE_JSON")"
+          if [ -n "$SUMS_URL" ]; then
+            curl -fsSL -o dist/SHA256SUMS "$SUMS_URL"
+            if grep -qF "  ${ASSET_NAME}" dist/SHA256SUMS; then
+              if (cd dist && grep -F "  ${ASSET_NAME}" SHA256SUMS | sha256sum -c -); then
+                echo "✅ 外层 SHA256 校验通过"
+              else
+                echo "❌ 离线包 SHA256 校验失败"
+                exit 1
+              fi
+            else
+              echo "::warning::SHA256SUMS 中没有 ${ASSET_NAME} 的记录，跳过外层校验（包内校验仍会执行）"
+            fi
+          else
+            echo "::warning::Release 中没有 SHA256SUMS 文件，跳过外层校验（包内校验仍会执行）"
+          fi
+
+      - name: Extract Offline Package to Build Context
+        run: |
+          set -euo pipefail
+          ASSET_FILE="$(find dist -maxdepth 1 -name '*.zip' -print -quit)"
+          if [ -z "$ASSET_FILE" ]; then
+            echo "❌ dist/ 下没有找到离线包 zip"
+            exit 1
+          fi
+
+          mkdir -p dist/context
+          unzip -q "$ASSET_FILE" -d dist/context
+
+          BUNDLE_DIR="$(find dist/context -mindepth 1 -maxdepth 1 -type d | head -n1)"
+          if [ -z "$BUNDLE_DIR" ]; then
+            echo "❌ 离线包解压后没有找到安装目录"
+            exit 1
+          fi
+          mv "$BUNDLE_DIR" dist/context/opencode-offline
+
+          # 把容器入口脚本放入构建上下文（Dockerfile 会 COPY 到镜像里）
+          cp examples/opencode/docker-entrypoint.sh dist/context/docker-entrypoint.sh
+          chmod +x dist/context/docker-entrypoint.sh
+
+          echo "=== 构建上下文内容 ==="
+          ls -la dist/context
+          echo ""
+          echo "=== 离线包内容 ==="
+          ls -la dist/context/opencode-offline
+          echo ""
+          echo "=== 包内平台版本 ==="
+          bash dist/context/opencode-offline/install.sh --list
+
+      - name: Verify Docker Hub Secrets
+        if: ${{ inputs.enable_dockerhub_push }}
+        env:
+          DH_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DH_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [ -z "$DH_USERNAME" ] || [ -z "$DH_TOKEN" ]; then
+            echo "❌ 未配置 Docker Hub 密钥"
+            echo "请在仓库 Settings → Secrets and variables → Actions 中添加:"
+            echo "  - DOCKERHUB_USERNAME"
+            echo "  - DOCKERHUB_TOKEN"
+            echo "或重新运行工作流时把 enable_dockerhub_push 设为 false"
+            exit 1
+          fi
+          echo "✅ Docker Hub 密钥已配置"
+
+      - name: Login to Docker Hub
+        if: ${{ inputs.enable_dockerhub_push }}
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build Docker Image
+        run: |
+          set -euo pipefail
+          echo "=========================================="
+          echo "开始构建镜像"
+          echo "=========================================="
+          docker build \
+            --platform linux/amd64 \
+            --build-arg UBUNTU_VERSION="${{ inputs.ubuntu_version }}" \
+            --build-arg OPENCODE_VERSION="${OPENCODE_VERSION}" \
+            --build-arg OPENCODE_VARIANT="${{ inputs.variant }}" \
+            --build-arg OPENCHAMBER_VERSION="${{ inputs.openchamber_version }}" \
+            -f examples/opencode/Dockerfile \
+            -t "${{ inputs.image_name }}" \
+            dist/context
+
+          echo ""
+          docker images "${{ inputs.image_name }}"
+
+      - name: Smoke Test Image
+        run: |
+          set -euo pipefail
+          echo "=========================================="
+          echo "镜像内软件验证"
+          echo "=========================================="
+
+          docker run --rm "${{ inputs.image_name }}" opencode --version
+          docker run --rm "${{ inputs.image_name }}" opencode2 --version
+          docker run --rm "${{ inputs.image_name }}" bash -lc 'command -v opencode && opencode --version'
+
+          OPENCHAMBER_INSTALLED_VERSION="$(docker run --rm "${{ inputs.image_name }}" openchamber --version | tail -n1 | tr -d '\r')"
+          echo "OPENCHAMBER_INSTALLED_VERSION=${OPENCHAMBER_INSTALLED_VERSION}" >> "$GITHUB_ENV"
+          echo "OpenChamber 版本: ${OPENCHAMBER_INSTALLED_VERSION}"
+
+          docker run --rm "${{ inputs.image_name }}" node --version
+
+          docker run --rm "${{ inputs.image_name }}" bash -lc '
+            missing=0
+            for t in vim ping ip ifconfig netstat dig nc tcpdump telnet traceroute wget curl ssh rsync; do
+              command -v "$t" >/dev/null || { echo "缺少: $t"; missing=1; }
+            done
+            if [ "$missing" -eq 0 ]; then echo "常用网络工具与 vim 均可用"; fi
+            exit "$missing"
+          '
+
+          echo "✅ 镜像内软件验证通过"
+
+      - name: Boot Test OpenChamber Server
+        run: |
+          set -euo pipefail
+          echo "=========================================="
+          echo "OpenChamber 服务启动测试"
+          echo "=========================================="
+
+          CONTAINER_NAME="openchamber-smoke-${{ github.run_id }}"
+          cleanup() { docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+
+          docker run -d --name "$CONTAINER_NAME" \
+            -e OPENCHAMBER_UI_PASSWORD=smoke-test-password \
+            -p 34567:3000 \
+            "${{ inputs.image_name }}"
+
+          ok=0
+          for _ in $(seq 1 60); do
+            if curl -s -o /dev/null --max-time 3 "http://127.0.0.1:34567/"; then
+              ok=1
+              break
+            fi
+            sleep 2
+          done
+
+          echo "--- 容器日志 ---"
+          docker logs "$CONTAINER_NAME" 2>&1 | tail -30 || true
+
+          if [ "$ok" -ne 1 ]; then
+            echo "❌ OpenChamber 服务在 120 秒内没有响应"
+            exit 1
+          fi
+
+          echo "✅ OpenChamber Web 服务可以正常启动并访问"
+
+      - name: Push to Docker Hub
+        if: ${{ inputs.enable_dockerhub_push }}
+        env:
+          HUB_IMAGE_INPUT: ${{ inputs.dockerhub_image_name }}
+          VISIBILITY: ${{ inputs.dockerhub_visibility }}
+          DH_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DH_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          LOCAL_IMAGE="${{ inputs.image_name }}"
+
+          # 解析目标仓库和自定义 tag
+          HUB_IMAGE="$HUB_IMAGE_INPUT"
+          if [ -z "$HUB_IMAGE" ]; then
+            HUB_IMAGE="${DH_USERNAME}/opencode"
+          fi
+          if [[ "$HUB_IMAGE" == *:* ]]; then
+            REPO="${HUB_IMAGE%%:*}"
+            CUSTOM_TAG="${HUB_IMAGE##*:}"
+          else
+            REPO="$HUB_IMAGE"
+            CUSTOM_TAG=""
+          fi
+          if [[ "$REPO" != */* ]]; then
+            echo "❌ Docker Hub 镜像名格式不正确: $HUB_IMAGE（应为 username/opencode[:tag]）"
+            exit 1
+          fi
+          echo "目标仓库: $REPO"
+
+          set_visibility() {
+            local code
+            code="$(curl -s -o /tmp/visibility-response.json -w '%{http_code}' -X PATCH \
+              "https://hub.docker.com/v2/repositories/${REPO}/" \
+              -H "Authorization: Bearer ${DH_TOKEN}" \
+              -H "Content-Type: application/json" \
+              -d "{\"visibility\": \"${VISIBILITY}\"}")"
+            echo "设置仓库可见性 (${VISIBILITY}): HTTP $code"
+            [[ "$code" = "200" || "$code" = "202" ]]
+          }
+
+          if set_visibility; then
+            echo "✅ 仓库可见性已设置为 ${VISIBILITY}"
+          else
+            echo "⚠️  设置可见性失败（首次推送时仓库可能还不存在，推送后会再试一次）"
+          fi
+
+          # 推送标签: 自定义 tag（如有）+ opencode 版本 + latest
+          TAGS=()
+          if [ -n "$CUSTOM_TAG" ]; then
+            TAGS+=("$CUSTOM_TAG")
+          fi
+          TAGS+=("${OPENCODE_VERSION}")
+          TAGS+=("latest")
+
+          for tag in "${TAGS[@]}"; do
+            docker tag "$LOCAL_IMAGE" "${REPO}:${tag}"
+            echo "推送 ${REPO}:${tag} ..."
+            docker push "${REPO}:${tag}"
+          done
+
+          if set_visibility; then
+            echo "✅ 仓库可见性已设置为 ${VISIBILITY}"
+          else
+            echo "⚠️  设置可见性失败，可稍后在 Docker Hub 网页手动调整"
+          fi
+
+          echo "=========================================="
+          echo "✅ 推送完成"
+          echo "拉取命令: docker pull ${REPO}:latest"
+          echo "镜像地址: https://hub.docker.com/r/${REPO}"
+          echo "=========================================="
+
+      - name: Save Image as TAR
+        if: ${{ !inputs.skip_tar_export }}
+        run: |
+          set -euo pipefail
+          sudo mkdir -p /mnt
+          sudo chmod 777 /mnt
+
+          SAFE_OPENCODE_VERSION="$(printf '%s' "${OPENCODE_VERSION}" | tr -c '0-9A-Za-z._-' '_')"
+          SAFE_OPENCHAMBER_VERSION="$(printf '%s' "${OPENCHAMBER_INSTALLED_VERSION}" | tr -c '0-9A-Za-z._-' '_')"
+
+          IMAGE_FILE="/mnt/docker-image-opencode-${SAFE_OPENCODE_VERSION}-openchamber-${SAFE_OPENCHAMBER_VERSION}-ubuntu${{ inputs.ubuntu_version }}-amd64.tar"
+          echo "IMAGE_FILE=${IMAGE_FILE}" >> "$GITHUB_ENV"
+          echo "ARTIFACT_NAME=docker-image-opencode-${SAFE_OPENCODE_VERSION}-openchamber-${SAFE_OPENCHAMBER_VERSION}-ubuntu${{ inputs.ubuntu_version }}-amd64" >> "$GITHUB_ENV"
+
+          echo "正在导出镜像到 ${IMAGE_FILE} ..."
+          docker save --output "${IMAGE_FILE}" "${{ inputs.image_name }}"
+
+          ls -lh "${IMAGE_FILE}"
+          df -h /mnt
+
+      - name: Generate Release Info
+        if: ${{ inputs.enable_release && !inputs.skip_tar_export }}
+        run: |
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          echo "RELEASE_TAG=opencode-image-${TIMESTAMP}" >> "$GITHUB_ENV"
+          echo "TIMESTAMP=${TIMESTAMP}" >> "$GITHUB_ENV"
+
+      - name: Create Release and Upload TAR
+        if: ${{ inputs.enable_release && !inputs.skip_tar_export }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: "opencode ${{ env.OPENCODE_VERSION }} + openchamber ${{ env.OPENCHAMBER_INSTALLED_VERSION }} 镜像 - ${{ env.TIMESTAMP }}"
+          body: |
+            ## OpenCode + OpenChamber Ubuntu 镜像导出
+
+            - **opencode 版本**: `${{ env.OPENCODE_VERSION }}`
+            - **OpenChamber 版本**: `${{ env.OPENCHAMBER_INSTALLED_VERSION }}`
+            - **Ubuntu 基础镜像**: `ubuntu:${{ inputs.ubuntu_version }}`
+            - **CPU 变体**: `${{ inputs.variant }}`
+            - **镜像名称**: `${{ inputs.image_name }}`
+            - **导出时间**: ${{ env.TIMESTAMP }}
+
+            ### 使用方法
+
+            ```bash
+            # 加载镜像
+            docker load -i ${{ env.ARTIFACT_NAME }}.tar
+
+            # 方式一：启动 OpenChamber Web 服务（浏览器访问 http://<主机>:3000）
+            docker run -d --name openchamber -p 3000:3000 -v "$PWD":/workspace ${{ inputs.image_name }}
+            docker logs openchamber   # 查看自动生成的 UI 密码
+
+            # 方式二：使用 opencode TUI
+            docker run -it --rm -v "$PWD":/workspace ${{ inputs.image_name }} opencode
+
+            # 需要 shell 时
+            docker run -it --rm -v "$PWD":/workspace ${{ inputs.image_name }} bash
+            ```
+
+            首次使用请在 opencode TUI 中执行 `/connect` 连接模型提供商。
+          files: ${{ env.IMAGE_FILE }}
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload to FTP
+        if: ${{ inputs.enable_ftp && !inputs.skip_tar_export }}
+        env:
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "$FTP_SERVER" ] || [ -z "$FTP_USERNAME" ] || [ -z "$FTP_PASSWORD" ]; then
+            echo "❌ 未配置 FTP_SERVER / FTP_USERNAME / FTP_PASSWORD"
+            exit 1
+          fi
+
+          echo "=========================================="
+          echo "开始上传到 FTP 服务器"
+          echo "=========================================="
+          echo "FTP 路径: ${{ inputs.ftp_path }}"
+          echo "文件: ${{ env.IMAGE_FILE }}"
+
+          # 确保路径以 / 结尾
+          FTP_PATH="${{ inputs.ftp_path }}"
+          if [[ "${FTP_PATH: -1}" != "/" ]]; then
+            FTP_PATH="${FTP_PATH}/"
+          fi
+
+          curl -T "${{ env.IMAGE_FILE }}" \
+            "ftp://${FTP_SERVER}:${{ inputs.ftp_port }}${FTP_PATH}${{ env.IMAGE_FILE }}" \
+            --user "${FTP_USERNAME}:${FTP_PASSWORD}" \
+            --ftp-create-dirs \
+            -v
+
+          echo "=========================================="
+          echo "✅ FTP 上传完成!"
+          echo "=========================================="
+
+      - name: Summary
+        env:
+          DH_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+        run: |
+          echo "=========================================="
+          echo "✅ 构建任务完成!"
+          echo "=========================================="
+          echo "镜像名称:     ${{ inputs.image_name }}"
+          echo "opencode 版本: ${OPENCODE_VERSION}"
+          echo "OpenChamber:   ${OPENCHAMBER_INSTALLED_VERSION}（Web 端口 3000）"
+          echo "Ubuntu 版本:   ubuntu:${{ inputs.ubuntu_version }}"
+
+          if [ "${{ inputs.enable_dockerhub_push }}" = "true" ]; then
+            HUB_IMAGE="${{ inputs.dockerhub_image_name }}"
+            if [ -z "$HUB_IMAGE" ]; then
+              HUB_IMAGE="${DH_USERNAME}/opencode"
+            fi
+            REPO="${HUB_IMAGE%%:*}"
+            echo "✅ 已推送到 Docker Hub: ${REPO}"
+            echo "   拉取: docker pull ${REPO}:latest"
+          else
+            echo "⏭️  已跳过 Docker Hub 推送"
+          fi
+
+          if [ "${{ inputs.skip_tar_export }}" = "true" ]; then
+            echo "⏭️  已跳过 TAR 导出"
+          else
+            echo "✅ 已导出 TAR: ${{ env.IMAGE_FILE }}"
+            if [ "${{ inputs.enable_release }}" = "true" ]; then
+              echo "✅ 已上传到 GitHub Release（tag: ${{ env.RELEASE_TAG }}）"
+            fi
+            if [ "${{ inputs.enable_ftp }}" = "true" ]; then
+              echo "✅ 已上传到 FTP"
+            fi
+          fi
+
+          echo ""
+          echo "📦 使用方法:"
+          echo "1. docker run -d -p 3000:3000 <镜像>       # 启动 OpenChamber Web（docker logs 查看 UI 密码）"
+          echo "2. docker run -it --rm <镜像> opencode      # opencode TUI"
+          echo "3. docker run -it --rm <镜像> bash          # 进入 shell"
+          echo "4. 挂载代码目录: docker run -it --rm -v \"\$PWD\":/workspace <镜像>"
+          echo "5. 首次使用在 opencode TUI 中执行 /connect 连接模型提供商"
+          echo "=========================================="

@@ -121,6 +121,43 @@ GitHub Actions 工作流，用于拉取指定的 Docker 镜像或从 Dockerfile 
 
 📖 **详细配置指南**: 查看 [ALIYUN_OSS_SETUP.md](ALIYUN_OSS_SETUP.md) 获取完整的配置说明和故障排除。
 
+### 方式五：构建带 OpenCode + OpenChamber 的 Ubuntu 镜像
+
+使用 `.github/workflows/build-opencode-image.yml` 构建一个内置 AI 编码工作台的
+Ubuntu（x86_64）镜像：
+
+- [OpenCode](https://opencode.ai/v2/docs) 来自
+  [lu9944/offline-opencode-installer](https://github.com/lu9944/offline-opencode-installer)
+  Release 中的离线安装包（官方独立二进制，不依赖 Node.js）
+- [OpenChamber](https://github.com/openchamber/openchamber) Web 工作台默认安装最新版并部署为默认启动服务
+- 附带常用网络工具（ping/ip/netstat/dig/traceroute/telnet/nc/tcpdump/ssh/rsync 等）与 vim
+
+1. 在 GitHub 上进入 **Actions** 标签页
+2. 选择 **Build OpenCode Ubuntu Image** 工作流
+3. 点击 **Run workflow**，输入参数：
+   - **opencode_version**: `latest`（默认，自动获取最新版）或具体版本如 `2.0.29`
+   - **openchamber_version**: `latest`（默认）或具体版本如 `2.3.2`
+   - **ubuntu_version**: `24.04`（默认）/ `22.04` / `20.04`
+   - **variant**: `linux-x64`（默认）；无 AVX2 的老 CPU 选 `linux-x64-baseline`
+   - **enable_dockerhub_push**: 是否推送到 Docker Hub（默认是）
+4. 等待构建完成后拉取使用（默认推送到 `<DOCKERHUB_USERNAME>/opencode`）：
+
+```bash
+docker pull <你的用户名>/opencode:latest
+
+# 启动 OpenChamber Web 服务（浏览器访问 http://<主机>:3000，docker logs 查看 UI 密码）
+docker run -d --name openchamber -p 3000:3000 -v "$PWD":/workspace <你的用户名>/opencode:latest
+
+# 或使用 opencode TUI
+docker run -it --rm -v "$PWD":/workspace <你的用户名>/opencode:latest opencode
+```
+
+工作流会自动完成：下载离线包 → SHA256 校验 → 解压 → 构建镜像（安装 Node.js 24 + 最新版
+OpenChamber）→ 验证各软件版本与网络工具 → **真实启动一次 OpenChamber 服务做访问测试** →
+推送到 Docker Hub（可选导出 TAR 到 Release / FTP）。
+
+📖 **更多详情**: 查看 [examples/opencode/README.md](examples/opencode/README.md)
+
 ## 使用示例
 
 ### 示例 1: 下载官方 Nginx 镜像
@@ -357,6 +394,30 @@ docker run -it nginx:latest
 > **注意**：使用阿里云 OSS 工作流前，需要先配置 `ALIYUN_OSS_ACCESS_KEY_ID` 和 `ALIYUN_OSS_ACCESS_KEY_SECRET` 密钥。详见 [ALIYUN_OSS_SETUP.md](ALIYUN_OSS_SETUP.md)。
 
 > **注意**：`enable_release` 和 `enable_ftp` 可以同时启用，文件将同时上传到两个位置。
+
+### OpenCode 镜像构建工作流 (`build-opencode-image.yml`)
+
+| 参数 | 必填 | 默认值 | 说明 |
+|------|------|--------|------|
+| opencode_version | 否 | latest | opencode 版本（latest 或具体版本号，如 2.0.29） |
+| openchamber_version | 否 | latest | OpenChamber 版本（latest 或具体版本号，如 2.3.2） |
+| ubuntu_version | 否 | 24.04 | Ubuntu 基础镜像版本（24.04 / 22.04 / 20.04） |
+| variant | 否 | linux-x64 | CPU 变体（linux-x64 / linux-x64-baseline / auto） |
+| image_name | 否 | opencode-ubuntu:latest | 本地构建的镜像名称和标签 |
+| enable_dockerhub_push | 否 | true | 是否推送到 Docker Hub |
+| dockerhub_image_name | 否 | - | Docker Hub 目标镜像名（留空则用 `<DOCKERHUB_USERNAME>/opencode`，推送版本 + latest） |
+| dockerhub_visibility | 否 | public | Docker Hub 仓库可见性 |
+| skip_tar_export | 否 | true | 是否跳过 TAR 导出 |
+| enable_release | 否 | false | 是否上传 TAR 到 GitHub Release |
+| enable_ftp | 否 | false | 是否上传 TAR 到 FTP |
+| ftp_port | 否 | 21 | FTP 端口 |
+| ftp_path | 否 | / | FTP 目标路径 |
+
+> **说明**：镜像使用离线包自带的 `install.sh --system` 安装 OpenCode（SHA256 校验 + 二进制运行验证），
+> 并通过 npm 安装最新版 OpenChamber 与 Node.js 24，附带常用网络工具和 vim。容器默认启动
+> OpenChamber Web 服务（端口 3000，自动生成并持久化 UI 密码），也可用
+> `docker run -it <镜像> opencode` 使用 TUI。构建在 Actions 中会自动做软件版本、网络工具和
+> OpenChamber 服务启动验证。
 
 ### 配置步骤
 

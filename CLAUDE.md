@@ -8,25 +8,35 @@ This is a **GitHub Actions workflow template** for pulling Docker images and sav
 
 ## Architecture
 
-The project consists of two GitHub Actions workflow files in `.github/workflows/`:
+The project consists of GitHub Actions workflow files in `.github/workflows/`:
 
-### Basic Workflow: `pull-docker-image.yml`
+### `pull-docker-image.yml` — Pull Docker Image and Save as TAR
 - Pulls any Docker image (public or private)
-- Saves as compressed TAR file
-- Single job with sequential steps
-- No additional Docker setup required
+- Saves as compressed TAR file; optional GitHub Release / FTP upload
+- Optionally authenticates with `DOCKERHUB_TOKEN` for private images / higher rate limits
 
-### Multi-Architecture Workflow: `pull-docker-image-multiarch.yml`
-- All basic features plus platform selection
-- Requires `docker/setup-buildx-action@v3` for cross-platform support
-- Supports 5 architectures: linux/amd64, linux/arm64, linux/arm/v7, linux/ppc64le, linux/s390x
-- Platform-aware artifact naming
+### `build-dockerfile.yml` — Build Dockerfile and Save as TAR
+- Builds an image from a Dockerfile in this repo (inputs: `dockerfile_path`, `image_name`, `build_context`)
+- Moves the Docker data-root to `/mnt` to work around runner disk limits
+- Pushes to Docker Hub (optional visibility management), optionally exports TAR to Release / FTP
 
-Both workflows:
-- Use `workflow_dispatch` trigger (manual execution only)
-- Use `actions/upload-artifact@v4` with compression-level 9
-- Store output filename in `GITHUB_ENV` for passing between steps
-- Display detailed progress information at each step
+### `build-opencode-image.yml` — Build OpenCode Ubuntu Image
+- Downloads the latest (or a pinned) release asset from the external repo `lu9944/offline-opencode-installer`,
+  verifies SHA256, extracts it, and builds `examples/opencode/Dockerfile`
+- The Dockerfile is multi-stage: stage 1 runs the offline package's `install.sh --system`
+  (installs the official standalone OpenCode binary to `/usr/local/bin`, no Node.js needed);
+  stage 2 installs Node.js 24 + the latest `@openchamber/web` (OpenChamber web workspace, port 3000),
+  common network tools and vim, then copies only the OpenCode binaries
+- `examples/opencode/docker-entrypoint.sh` is staged into the build context and installed as the
+  image entrypoint: defaults to `0.0.0.0`, generates/persists the OpenChamber UI password, creates an
+  SSH key on first start, and execs the given command (`opencode` for TUI, `bash`, `openchamber`, ...)
+- CI smoke tests on the runner: tool versions, presence of network tools/vim, and a real
+  OpenChamber server boot/HTTP check; then pushes to Docker Hub / optionally exports TAR
+
+### `apt-packages-to-ftp.yml` — Extract APT Packages and Upload to FTP
+- Builds a throwaway container from a base image, downloads apt/pip packages with all dependencies
+- Packages them as `tar.gz` with an install script, uploads to FTP and Actions Artifacts
+
 
 ## Code Style
 
