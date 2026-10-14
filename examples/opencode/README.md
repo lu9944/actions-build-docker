@@ -74,7 +74,8 @@ docker run --rm opencode-ubuntu:latest openchamber --version
    - **variant**：`linux-x64`（默认）；无 AVX2 的老 CPU 选 `linux-x64-baseline`
    - **enable_dockerhub_push**：推送到 Docker Hub（需要 `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN`）
 3. 构建完成后工作流会自动验证：opencode / openchamber / Node 版本、网络工具与 vim、
-   并真实启动一次 OpenChamber 服务确认可访问；随后推送到 Docker Hub（可选导出 TAR 到 Release / FTP）
+   并真实启动一次 OpenChamber 服务确认可访问；随后推送到 Docker Hub 并导出 TAR 到
+   GitHub Release（FTP 可选）
 
 ## 方式二：本地构建
 

@@ -154,7 +154,7 @@ docker run -it --rm -v "$PWD":/workspace <你的用户名>/opencode:latest openc
 
 工作流会自动完成：下载离线包 → SHA256 校验 → 解压 → 构建镜像（安装 Node.js 24 + 最新版
 OpenChamber）→ 验证各软件版本与网络工具 → **真实启动一次 OpenChamber 服务做访问测试** →
-推送到 Docker Hub（可选导出 TAR 到 Release / FTP）。
+推送到 Docker Hub，并导出 TAR 上传到 GitHub Release（FTP 可选）。
 
 📖 **更多详情**: 查看 [examples/opencode/README.md](examples/opencode/README.md)
 
@@ -407,8 +407,8 @@ docker run -it nginx:latest
 | enable_dockerhub_push | 否 | true | 是否推送到 Docker Hub |
 | dockerhub_image_name | 否 | - | Docker Hub 目标镜像名（留空则用 `<DOCKERHUB_USERNAME>/opencode`，推送版本 + latest） |
 | dockerhub_visibility | 否 | public | Docker Hub 仓库可见性 |
-| skip_tar_export | 否 | true | 是否跳过 TAR 导出 |
-| enable_release | 否 | false | 是否上传 TAR 到 GitHub Release |
+| skip_tar_export | 否 | false | 是否跳过 TAR 导出 |
+| enable_release | 否 | true | 是否上传 TAR 到 GitHub Release |
 | enable_ftp | 否 | false | 是否上传 TAR 到 FTP |
 | ftp_port | 否 | 21 | FTP 端口 |
 | ftp_path | 否 | / | FTP 目标路径 |

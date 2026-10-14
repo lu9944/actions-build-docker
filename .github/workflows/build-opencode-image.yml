@@ -56,17 +56,17 @@ on:
           - 'public'
           - 'private'
       skip_tar_export:
-        description: '跳过 TAR 导出（不需要离线 tar 文件时保持勾选）'
-        required: false
-        default: true
-        type: boolean
-      enable_release:
-        description: '上传 TAR 到 GitHub Release（需要先取消跳过 TAR 导出）'
+        description: '跳过 TAR 导出（默认导出，不需要离线 tar 文件时勾选）'
         required: false
         default: false
         type: boolean
+      enable_release:
+        description: '上传 TAR 到 GitHub Release（需要 TAR 导出未跳过）'
+        required: false
+        default: true
+        type: boolean
       enable_ftp:
-        description: '上传 TAR 到 FTP（需要先取消跳过 TAR 导出）'
+        description: '上传 TAR 到 FTP（需要 TAR 导出未跳过）'
         required: false
         default: false
         type: boolean
