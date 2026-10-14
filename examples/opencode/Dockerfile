@@ -44,6 +44,9 @@ RUN set -eux; \
 # ---------------------------------------------------------------------------
 FROM ubuntu:${UBUNTU_VERSION}
 
+# 后续 RUN 使用 bash（Node.js 安装步骤用到 pipefail，dash 不支持）
+SHELL ["/bin/bash", "-c"]
+
 ARG OPENCODE_VERSION=unknown
 ARG OPENCHAMBER_VERSION=latest
 ARG NODE_MAJOR=24
