@@ -102,11 +102,11 @@ RUN set -euxo pipefail; \
     node_file="$(grep -o "node-v[0-9.]*-linux-${node_arch}\.tar\.xz" /tmp/node-sums.txt | head -n1)"; \
     [ -n "$node_file" ] || { echo "未在 SHASUMS256.txt 中找到 Node.js 安装包"; exit 1; }; \
     echo "安装 Node.js: $node_file"; \
-    curl -fsSL "$dist/$node_file" -o /tmp/node.tar.xz; \
+    curl -fsSL "$dist/$node_file" -o "/tmp/$node_file"; \
     (cd /tmp && grep " ${node_file}$" node-sums.txt | sha256sum -c -); \
-    tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 \
+    tar -xJf "/tmp/$node_file" -C /usr/local --strip-components=1 \
         --exclude=CHANGELOG.md --exclude=LICENSE --exclude=README.md; \
-    rm -f /tmp/node.tar.xz /tmp/node-sums.txt; \
+    rm -f "/tmp/$node_file" /tmp/node-sums.txt; \
     node --version; \
     npm --version
 
